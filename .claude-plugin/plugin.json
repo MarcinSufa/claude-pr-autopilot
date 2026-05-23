@@ -1,0 +1,23 @@
+{
+  "name": "pr-autopilot",
+  "version": "0.1.0",
+  "description": "Automated PR review loop: enabled reviewers review (Cursor by default), Claude fixes, iterate until merge-ready. Open PR, walk away, come back when it's 5/5.",
+  "author": {
+    "name": "Marcin Sufa",
+    "email": "sufa.marcin@gmail.com"
+  },
+  "homepage": "https://github.com/MarcinSufa/claude-pr-autopilot",
+  "repository": "https://github.com/MarcinSufa/claude-pr-autopilot",
+  "license": "MIT",
+  "skills": "./",
+  "keywords": [
+    "github",
+    "pull-request",
+    "code-review",
+    "cursor",
+    "copilot",
+    "automation",
+    "claude-code",
+    "loop"
+  ]
+}

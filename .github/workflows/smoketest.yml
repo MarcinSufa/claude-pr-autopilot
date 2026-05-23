@@ -1,0 +1,87 @@
+name: smoketest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  schema-validation:
+    name: schema validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate plugin.json parses as JSON
+        run: python -c "import json; json.load(open('.claude-plugin/plugin.json'))"
+
+      - name: Validate marketplace.json parses as JSON
+        run: python -c "import json; json.load(open('.claude-plugin/marketplace.json'))"
+
+      - name: Validate SKILL.md frontmatter has required fields (name, description)
+        run: |
+          if [ ! -f SKILL.md ]; then
+            echo "SKILL.md does not exist yet — skipping (will be enforced after Task 17)"
+            exit 0
+          fi
+          python -c "
+          import re, sys
+          with open('SKILL.md') as f:
+              content = f.read()
+          m = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
+          if not m:
+              print('ERROR: SKILL.md missing YAML frontmatter')
+              sys.exit(1)
+          fm = m.group(1)
+          for field in ['name:', 'description:']:
+              if field not in fm:
+                  print(f'ERROR: SKILL.md frontmatter missing required field: {field}')
+                  sys.exit(1)
+          print('OK: SKILL.md frontmatter valid')
+          "
+
+      - name: Validate plugin.json version matches semver
+        run: |
+          python -c "
+          import json, re, sys
+          v = json.load(open('.claude-plugin/plugin.json'))['version']
+          if not re.match(r'^\d+\.\d+\.\d+(-[a-z0-9.]+)?$', v):
+              print(f'ERROR: plugin.json version {v} is not valid semver')
+              sys.exit(1)
+          print(f'OK: version {v} is valid semver')
+          "
+
+  markdownlint:
+    name: markdown lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli@0.41.0
+
+      - name: Lint all markdown files
+        run: |
+          markdownlint '**/*.md' --ignore node_modules \
+            --disable MD013 MD024 MD033 MD041 \
+            || (echo 'Markdown lint failed' && exit 1)

@@ -1,0 +1,20 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.cursor/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Skill runtime artifacts — never commit state files or credentials
+.pr-autopilot/
+credentials.json
+*.github-token
+
+# Test artifacts
+test-output/
+*.local

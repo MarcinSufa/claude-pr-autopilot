@@ -30,6 +30,7 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
     "reviewers": {
       "cursor":     { "enabled": true,  "login": "cursor[bot]", "scoreRegex": "(?i)score:\\s*([1-5])" },
       "copilot":    { "mode": "final-only", "login": "copilot-pull-request-reviewer[bot]" },
+      "copilotSwe": { "mode": "off", "login": "copilot-swe-agent" },
       "codex":      { "mode": "off", "postCommentsToPR": false },
       "claudeSelf": { "enabled": false, "rubricFile": "SELF-REVIEW-RUBRIC.md" }
     },
@@ -54,11 +55,18 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 | Config field | `enabledForEachIter` | `enabledForFinal` | `requiresTrigger` | `postsThreads` | Score signal |
 |---|---|---|---|---|---|
 | `cursor.enabled=true` | yes | no | no (auto on push) | yes | `Score: N/5` regex |
-| `copilot.mode=each-iter` | yes | no | yes (`@copilot review` comment) | yes | "0 unresolved threads" |
-| `copilot.mode=final-only` | no | yes | yes (one-shot at end) | yes | "0 unresolved threads" |
+| `copilot.mode=each-iter` | yes | no | yes (`requested_reviewers` API with `Copilot` — NOT `@copilot` mention which triggers SWE Agent) | yes | "0 unresolved threads" |
+| `copilot.mode=final-only` | no | yes | yes (same API, one-shot at end) | yes | "0 unresolved threads" |
+| `copilotSwe.mode=each-iter` | yes | no | yes (`gh pr comment "@copilot please review"`) | no — top-level conversational comments | Claude judgment on comment body |
+| `copilotSwe.mode=final-only` | no | yes | yes (same mention, one-shot at end) | no | Claude judgment on comment body |
 | `codex.mode=each-iter` | yes | no | yes (`codex review --diff`) | no | pass/fail |
 | `codex.mode=final-only` | no | yes | yes (one-shot at end) | no | pass/fail |
 | `claudeSelf.enabled=true` | no (final-only by design) | yes | no (internal) | no | 1-5 vs rubric |
+
+**⚠ Important: Copilot has TWO products** — `copilot` (Copilot Code Review) and `copilotSwe` (Copilot SWE Agent). They are DIFFERENT:
+- **Code Review** posts structured line-level threads. Triggered by adding `Copilot` via the requested-reviewers API (the `@copilot` mention does NOT trigger this). May require specific repo setup (rulesets or manual reviewer add) and a paid Copilot tier with Code Review enabled.
+- **SWE Agent** posts conversational top-level comments. Triggered by `@copilot please review` mention. Works out-of-box on most repos with Copilot installed. Cannot do line-level fixes; gives prose feedback only.
+Per real-world testing (2026-05-23), SWE Agent fires more reliably on private repos. Code Review may need additional setup most users don't have. Default to `copilotSwe` if Code Review doesn't respond within 10 poll-ticks.
 
 ## Pre-flight: config validation
 
@@ -185,8 +193,22 @@ per_iter_reviewers = config.reviewers | filter where derivation.enabledForEachIt
 for r in per_iter_reviewers:
   if r.derivation.requiresTrigger:
     case r.name:
-      "copilot": gh pr comment ${prNumber} --body "@copilot please review"
-      "codex":   codex review --diff origin/${pr.baseRefName}..HEAD --format json > /tmp/codex_review_${prNumber}.json
+      "copilot":
+        # Copilot CODE REVIEW (line-level threaded)
+        # Use the requested_reviewers API, NOT @copilot mention (mention triggers SWE Agent)
+        gh api repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers \
+          --method POST -f 'reviewers[]=Copilot' >/dev/null 2>&1 || true
+      "copilotSwe":
+        # Copilot SWE AGENT (conversational top-level comment)
+        # Only post the trigger if there's no recent comment from copilot-swe-agent
+        # since our last push (avoid spamming)
+        latest_swe_comment_after_our_head = gh pr view ${prNumber} --json comments \
+          | jq --arg sha "${state.lastHandledHeadOid}" \
+              'last(.comments[] | select(.author.login == "copilot-swe-agent"))'
+        if no recent SWE comment OR last comment predates our push:
+          gh pr comment ${prNumber} --body "@copilot please review"
+      "codex":
+        codex review --diff origin/${pr.baseRefName}..HEAD --format json > /tmp/codex_review_${prNumber}.json
 ```
 
 ### 6. Fetch outcomes from per-iter reviewers + unresolved threads
@@ -200,6 +222,14 @@ for r in per_iter_reviewers:
       outcomes["cursor"].score = jq regex match config.reviewers.cursor.scoreRegex against last review body
     "copilot":
       outcomes["copilot"].hasReviewed = (any review in pr.reviews where author.login == config.reviewers.copilot.login)
+    "copilotSwe":
+      # SWE Agent uses TOP-LEVEL issue comments, not PR review threads
+      swe_comments = gh pr view ${prNumber} --json comments \
+        | jq --arg login "${config.reviewers.copilotSwe.login}" \
+            '[.comments[] | select(.author.login == $login)]'
+      outcomes["copilotSwe"].hasReviewed = (swe_comments.length > 0 AND timestamp of latest comment >= our headOid push time)
+      outcomes["copilotSwe"].latestCommentBody = last(swe_comments).body
+      # isSuccess determined by Claude reading the comment body — see step 9
     "codex":
       outcomes["codex"].result = parse pass/fail from /tmp/codex_review_${prNumber}.json
 
@@ -260,9 +290,13 @@ pushback_thread_ids = state.pushbackReplies | jq 'map(.threadId)'
 unresolved_not_ours = threads | filter where (.id NOT IN pushback_thread_ids)
 
 # Per-reviewer isSuccess (defined per-adapter):
-# - cursor:  outcomes.cursor.score == "5"
-# - copilot: count of unresolved threads where author == copilot.login == 0
-# - codex:   outcomes.codex.result == "pass"
+# - cursor:     outcomes.cursor.score == "5"
+# - copilot:    count of unresolved threads where author == copilot.login == 0
+# - copilotSwe: Claude reads outcomes.copilotSwe.latestCommentBody and judges whether it expresses approval
+#                ("no blockers", "looks good", "ready to merge", "approved", "no issues found", etc.)
+#                vs lists issues to address. NO score; pure LLM judgment of natural language.
+#                If body lists actionable issues, treat each as a pseudo-thread for triage in step 10.
+# - codex:      outcomes.codex.result == "pass"
 
 all_per_iter_happy = all(adapter.isSuccess(outcomes[r.name]) for r in per_iter_reviewers)
 

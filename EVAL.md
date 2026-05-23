@@ -83,19 +83,24 @@ gh pr view <PR#> --json reviews --jq '.reviews[].author.login' | sort -u
 
 ### Step 0 results
 
-- **Date run:** _____
-- **PR used:** _____
-- **Cursor login observed:** _____ (matched default `cursor[bot]`? Y/N)
-- **Copilot login observed:** _____ (matched default `copilot-pull-request-reviewer[bot]`? Y/N)
-- **Action taken:** _____ (no change / updated SKILL.md defaults / updated plugin.json defaults)
+- **Date run:** 2026-05-23
+- **PR used:** MarcinSufa/exo-vault#127
+- **Cursor login observed:** N/A (not enrolled on this repo; user hadn't subscribed to Cursor Pro)
+- **Copilot login observed:** `copilot-swe-agent` (NOT `copilot-pull-request-reviewer[bot]`)
+- **Critical finding:** `@copilot please review` mention triggers Copilot SWE Agent, not Copilot Code Review. They are different products. Copilot Code Review did NOT fire on this private repo even when requested via the `requested_reviewers` API.
+- **Action taken:** Patched SKILL.md to clarify the trigger distinction (`gh api requested_reviewers` for Code Review, `@copilot` mention for SWE Agent). Added new `copilotSwe` reviewer adapter to spec + config schema. Updated test user's `~/.claude/settings.json` to use `copilotSwe` with `mode: each-iter`.
 
-### Scenario 1 — Happy path
+### Scenario 1 — Happy path (PARTIAL — immediate-approval variant)
 
-- **Date run:** _____
-- **PR used:** _____
-- **Iterations to SUCCESS:** _____ (target: ≤ 3)
-- **Wall-clock time:** _____ (target: 5-15 min)
-- **Outcome:** PASS / FAIL — _____ (notes)
+- **Date run:** 2026-05-23
+- **PR used:** MarcinSufa/exo-vault#127 (fixture: `src/_pr-autopilot-test.ts` with 7 deliberate code smells)
+- **Iterations to SUCCESS:** 1 (immediate)
+- **Wall-clock time:** ~3 min (mostly Copilot's response latency)
+- **Outcome:** PARTIAL PASS — algorithm reached SUCCESS_STOP cleanly on first iteration, but did NOT exercise the fix-and-push cycle.
+- **Why partial:** PR body explicitly stated "deliberate smells for the EVAL scenario." Copilot SWE Agent read the body context and correctly classified the smells as "intentional artifacts" → gave immediate approval verdict → algorithm short-circuited to SUCCESS_STOP without applying any fixes.
+- **Algorithm coverage validated:** pre-flight (0.1–0.4), step 1 fetch, step 2 lifecycle, step 3 branch guard, step 4 iter cap, step 5 CI green, step 5.5 trigger (skipped — already triggered), step 6 fetch outcome, step 8 poll-tick reset, step 9 success aggregate, step 9b final-pass (skipped — none enabled), step 9c SUCCESS_STOP (no ScheduleWakeup → loop terminates cleanly).
+- **NOT validated this run:** step 10 triage, step 11 pre-commit + push, step 11.5 stall guard, multi-iteration ScheduleWakeup → CONTINUE cycle.
+- **Follow-up needed:** repeat scenario with a PR whose body does NOT mention "intentional" so SWE Agent flags the smells as real issues. That exercises the fix-and-push cycle.
 
 ### Scenario 4 — CI breaks mid-loop
 
@@ -118,9 +123,45 @@ gh pr view <PR#> --json reviews --jq '.reviews[].author.login' | sort -u
 
 ### Scenario 17 — Reviewer-mode alt: Copilot each-iter (no Cursor)
 
-- **Date run:** _____
-- **PR used:** _____
-- **Outcome:** PASS / FAIL — _____ (notes)
+- **Date run:** 2026-05-23
+- **PR used:** MarcinSufa/exo-vault#128 (closed; fix-cycle test)
+- **Outcome:** VARIANT PASS — validated a Mode Y rotation pattern (SWE Agent fixer + Claude reviewer) instead of the originally-specified pattern (reviewer + Claude fixer). See "v0.1.0 testing outcomes — design tension discovered" below.
+
+## v0.1.0 testing outcomes — design tension discovered
+
+The empirical real-PR test (PRs #127 + #128 on MarcinSufa/exo-vault) surfaced an architectural insight the original spec didn't account for. **Copilot has two products** that look similar but behave very differently:
+
+| | Copilot Code Review | Copilot SWE Agent (Coding Agent) |
+|---|---|---|
+| Trigger | `gh api requested_reviewers -f 'reviewers[]=Copilot'` | `@copilot please review` mention |
+| Role | Reviewer only — posts threaded comments | **Reviewer AND fixer** — applies fixes + pushes commits + adds tests |
+| Output | Line-level threads + summary | Top-level conversational comment + committed code changes |
+| Marcin's setup status (2026-05-23) | Configured but did not fire on private repo (rulesets/tier setup unclear) | Worked reliably, both runs |
+
+**The design tension:** v0.1.0 spec assumed two roles (reviewer + Claude as fixer). But SWE Agent **collapses both roles** — it does the fixer's job itself. When using SWE Agent, Claude's "fix" role in the loop is redundant.
+
+User-proposed resolution (2026-05-23, validated empirically): **two-role rotation modes** where each party validates the other:
+
+- **Mode X — Claude fixes, Copilot/Cursor reviews** (original spec): Claude as primary fixer, reviewer comments validate Claude's work. Loop until reviewer approves.
+- **Mode Y — SWE Agent fixes, Claude reviews**: SWE Agent as primary fixer, Claude reads SWE Agent's commits against `PUSHBACK.md` and either approves or flags behavior-changing concerns. Loop until Claude is satisfied OR PAUSES for human input on PAUSE-rule violations.
+
+PR #128 walkthrough validated Mode Y end-to-end:
+1. PR opened with neutral description (no "intentional test fixture" framing)
+2. `@copilot please review` posted as comment → SWE Agent woke up
+3. SWE Agent identified 7 code smells, applied all 7 fixes, added a 6-test test file, pushed as commit `cbbddd20`
+4. Claude (acting as the reviewer half of Mode Y) read SWE Agent's diff, applied `PUSHBACK.md` rubric per change:
+   - 7 of 8 changes APPROVED (renames, typo fix, magic number extraction, boolean simplification, return-type annotations, added tests)
+   - 1 change FLAGGED for PAUSE: `age > 18` → `age >= 18` is a behavior change SWE Agent applied unilaterally; per PUSHBACK rule "behavior changes need human confirmation"
+5. Claude posted structured review comment on PR (visible at PR #128 comment 4526042632) with verdict
+6. User decides on the flagged item — Mode Y exits to PAUSE per design
+
+**v0.2 follow-up required:** rewrite SKILL.md to first-class both rotation modes. Today's spec only models Mode X.
+
+### Scenario 21 (added during test) — Copilot Code Review trigger via wrong mechanism
+
+- **Date run:** 2026-05-23
+- **Setup:** PR #127, attempted to trigger Copilot Code Review via `@copilot please review` comment
+- **Outcome:** TRIGGER WRONG — `@copilot` mention fires SWE Agent, not Code Review. `requested_reviewers` API is the correct trigger. **Patched in commit c682890** (added `copilotSwe` adapter + clarified `copilot` adapter trigger doc).
 
 ---
 

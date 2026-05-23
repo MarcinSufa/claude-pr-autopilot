@@ -1,0 +1,365 @@
+---
+name: pr-autopilot
+description: Automated PR review loop. Run /loop /pr-autopilot-step <PR#> after creating a PR; the skill fetches reviews from enabled reviewers, applies fixes or pushes back with reasoning, pushes commits, and waits for re-review. Stops when all enabled per-iteration reviewers report success (default: Cursor score 5/5 + Copilot final-pass 0 unresolved). Ten independent safety stops. Use when - "automate my PR review", "loop until merge-ready", "fix PR review comments automatically".
+---
+
+# /pr-autopilot-step <PR_NUMBER>
+
+One iteration of the PR review→fix loop. Invoked by `/loop` (Claude Code's dynamic-mode loop driver). Returns by either:
+
+- Calling `ScheduleWakeup(delaySeconds=90, prompt="/loop /pr-autopilot-step <PR_NUMBER>", reason="polling for reviewer re-review")` to continue the loop
+- Omitting the `ScheduleWakeup` call to terminate the loop
+
+## Required tools on user machine
+
+- `gh` (GitHub CLI, authenticated)
+- `jq` (JSON processor)
+- `git`
+
+## Configuration
+
+Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
+
+```json
+{
+  "prAutopilot": {
+    "pollIntervalSeconds": 90,
+    "fixIterationCap": 5,
+    "pollTickCap": 10,
+    "stallTickCap": 6,
+    "reviewers": {
+      "cursor":     { "enabled": true,  "login": "cursor[bot]", "scoreRegex": "(?i)score:\\s*([1-5])" },
+      "copilot":    { "mode": "final-only", "login": "copilot-pull-request-reviewer[bot]" },
+      "codex":      { "mode": "off", "postCommentsToPR": false },
+      "claudeSelf": { "enabled": false, "rubricFile": "SELF-REVIEW-RUBRIC.md" }
+    },
+    "preCommitProfiles": {
+      "exo-vault": [
+        {"cmd": "pnpm run build"},
+        {"cmd": "cd mcp-server && pnpm run build", "if": "git diff --name-only HEAD~1 HEAD | grep -q '^mcp-server/'"},
+        {"cmd": "pnpm run lint"},
+        {"cmd": "pnpm test"},
+        {"cmd": "pnpm exec tsc --noEmit"}
+      ],
+      "default-pnpm": [{"cmd": "pnpm run typecheck"}, {"cmd": "pnpm run lint"}, {"cmd": "pnpm test"}],
+      "default-npm":  [{"cmd": "npm run typecheck"},  {"cmd": "npm run lint"},  {"cmd": "npm test"}],
+      "default-yarn": [{"cmd": "yarn typecheck"},     {"cmd": "yarn lint"},     {"cmd": "yarn test"}]
+    }
+  }
+}
+```
+
+## Config → algorithm derivation
+
+| Config field | `enabledForEachIter` | `enabledForFinal` | `requiresTrigger` | `postsThreads` | Score signal |
+|---|---|---|---|---|---|
+| `cursor.enabled=true` | yes | no | no (auto on push) | yes | `Score: N/5` regex |
+| `copilot.mode=each-iter` | yes | no | yes (`@copilot review` comment) | yes | "0 unresolved threads" |
+| `copilot.mode=final-only` | no | yes | yes (one-shot at end) | yes | "0 unresolved threads" |
+| `codex.mode=each-iter` | yes | no | yes (`codex review --diff`) | no | pass/fail |
+| `codex.mode=final-only` | no | yes | yes (one-shot at end) | no | pass/fail |
+| `claudeSelf.enabled=true` | no (final-only by design) | yes | no (internal) | no | 1-5 vs rubric |
+
+## Pre-flight: config validation
+
+```
+if NOT any(r.enabledForEachIter for r in {cursor, copilot, codex}):
+  PushNotification("config error", "no per-iter reviewer enabled; nothing would drive the loop")
+  return  # do not call ScheduleWakeup → loop terminates
+```
+
+## Algorithm: prAutopilotStep(prNumber)
+
+### 0. Load state
+
+```bash
+STATE_FILE="$HOME/.pr-autopilot/$(gh repo view --json owner --jq '.owner.login')-$(gh repo view --json name --jq '.name')-${prNumber}.json"
+if [ -f "$STATE_FILE" ]; then state = read $STATE_FILE; else state = createNew(prNumber); fi
+```
+
+State schema:
+
+```json
+{
+  "prNumber": 0,
+  "repo": "<owner>/<name>",
+  "headRef": "<branch>",
+  "fixIterations": 0,
+  "pollTicksWithoutReview": 0,
+  "ticksWithoutProgress": 0,
+  "lastHandledHeadOid": "<sha>",
+  "lastSeenReviewId": "<gh-review-id>",
+  "pushbackReplies": [{"threadId": "<id>", "iteration": 0, "reason": "..."}],
+  "createdAt": "<iso>",
+  "updatedAt": "<iso>"
+}
+```
+
+### 1. Fetch PR state
+
+```
+pr = gh pr view ${prNumber} --json headRefName,baseRefName,headRefOid,number,state,reviews,statusCheckRollup
+```
+
+### 2. PR lifecycle guard
+
+```
+if pr.state in {CLOSED, MERGED}:
+  delete $STATE_FILE
+  PushNotification("PR ${prNumber} ${pr.state}", "loop done; state cleaned up")
+  return  # terminate
+```
+
+### 3. Branch protection guard
+
+```
+if pr.headRefName in {dev, master, main}:
+  PushNotification("ABORT", "refusing to operate on direct dev/master/main PR")
+  return  # terminate
+```
+
+### 4. Fix-iteration cap
+
+```
+if state.fixIterations >= config.fixIterationCap:
+  PushNotification("ABORT", "${config.fixIterationCap} fix-iteration cap reached; manual review required")
+  return  # terminate
+```
+
+### 5. CI health check
+
+`lastHandledHeadOid` was set in step 11 of the PREVIOUS iteration right after we pushed. If current `headRefOid` still matches, no other actor pushed in between — the failed CI is from OUR push.
+
+```
+required_checks = pr.statusCheckRollup | filter where isRequired
+any_failed = required_checks | any where conclusion == "FAILURE"
+any_pending = required_checks | any where state in {QUEUED, IN_PROGRESS, PENDING}
+
+if any_failed AND pr.headRefOid == state.lastHandledHeadOid:
+  PushNotification("ABORT", "CI failed on our last push; investigate before continuing")
+  return  # terminate
+
+if any_pending:
+  # CONTINUE — wait for CI to settle
+  saveState($STATE_FILE)
+  ScheduleWakeup(90s, ...)
+  return  # waiting
+```
+
+### 5.5 Trigger non-auto reviewers
+
+```
+per_iter_reviewers = config.reviewers | filter where derivation.enabledForEachIter == true
+for r in per_iter_reviewers:
+  if r.derivation.requiresTrigger:
+    case r.name:
+      "copilot": gh pr comment ${prNumber} --body "@copilot please review"
+      "codex":   codex review --diff origin/${pr.baseRefName}..HEAD --format json > /tmp/codex_review_${prNumber}.json
+```
+
+### 6. Fetch outcomes from per-iter reviewers + unresolved threads
+
+```
+outcomes = {}  # per-adapter outcome
+for r in per_iter_reviewers:
+  case r.name:
+    "cursor":
+      outcomes["cursor"] = parse cursor reviews from pr.reviews where author.login == config.reviewers.cursor.login
+      outcomes["cursor"].score = jq regex match config.reviewers.cursor.scoreRegex against last review body
+    "copilot":
+      outcomes["copilot"].hasReviewed = (any review in pr.reviews where author.login == config.reviewers.copilot.login)
+    "codex":
+      outcomes["codex"].result = parse pass/fail from /tmp/codex_review_${prNumber}.json
+
+# Unified threads fetch — only for reviewers whose adapter.postsThreads == true
+github_reviewer_logins = [config.reviewers[r.name].login for r in per_iter_reviewers if r.derivation.postsThreads]
+
+threads_raw = gh api graphql -f query='
+  query($n:Int!, $r:String!, $o:String!) {
+    repository(owner:$o, name:$r) {
+      pullRequest(number:$n) {
+        reviewThreads(first:50) {
+          totalCount
+          nodes {
+            id isResolved
+            comments(first:5) {
+              nodes { databaseId body path line author { login } }
+            }
+          }
+        }
+      }
+    }
+  }' \
+  -F n=${prNumber} -F r=${repo} -F o=${owner}
+
+total = threads_raw | jq '.data.repository.pullRequest.reviewThreads.totalCount'
+if total >= 50:
+  PushNotification("PAUSE", "≥50 review threads; likely truncation, manual cleanup needed")
+  return  # PAUSE (terminate without scheduling)
+
+threads = threads_raw | jq '
+  .data.repository.pullRequest.reviewThreads.nodes
+  | map(select(
+      .isResolved == false
+      and (.comments.nodes[0].author.login as $a | $logins | index($a))
+    ))' --argjson logins "${github_reviewer_logins}"
+```
+
+### 8. Poll-tick counter
+
+```
+any_reviewer_has_reviewed = any(outcomes[r.name].hasReviewed for r in per_iter_reviewers)
+if NOT any_reviewer_has_reviewed:
+  state.pollTicksWithoutReview++
+  if state.pollTicksWithoutReview >= config.pollTickCap:
+    PushNotification("ABORT", "${config.pollTickCap} poll-tick cap reached without any per-iter reviewer reviewing; check setup docs for each enabled reviewer (Cursor/Copilot/Codex)")
+    return  # terminate
+  saveState($STATE_FILE)
+  ScheduleWakeup(90s, ...)
+  return  # waiting for first review
+else:
+  state.pollTicksWithoutReview = 0
+```
+
+### 9. Success path (multi-reviewer aggregate)
+
+```
+pushback_thread_ids = state.pushbackReplies | jq 'map(.threadId)'
+unresolved_not_ours = threads | filter where (.id NOT IN pushback_thread_ids)
+
+# Per-reviewer isSuccess (defined per-adapter):
+# - cursor:  outcomes.cursor.score == "5"
+# - copilot: count of unresolved threads where author == copilot.login == 0
+# - codex:   outcomes.codex.result == "pass"
+
+all_per_iter_happy = all(adapter.isSuccess(outcomes[r.name]) for r in per_iter_reviewers)
+
+if all_per_iter_happy AND unresolved_not_ours.length == 0:
+  # 9a. Run final-pass reviewers
+  final_pass_reviewers = config.reviewers | filter where derivation.enabledForFinal == true
+  for r in final_pass_reviewers:
+    case r.name:
+      "copilot":
+        gh pr comment ${prNumber} --body "@copilot please review this PR — primary reviewers scored it ready"
+        sleep 5 minutes (or pollInterval * 4); fetch Copilot threads
+        if any unresolved Copilot thread → PAUSE
+      "codex":
+        codex review --diff origin/${pr.baseRefName}..HEAD --format json
+        if pass → continue; if fail → PAUSE
+      "claudeSelf":
+        read SELF-REVIEW-RUBRIC.md (from config.reviewers.claudeSelf.rubricFile)
+        read git diff origin/${pr.baseRefName}..HEAD
+        emit 1-5 score against rubric; if < 5 → PAUSE
+
+  # 9b. All clear
+  PushNotification("PR #${prNumber} ready", "all reviewers green; review summary: <per-reviewer outcomes>")
+  delete $STATE_FILE
+  return  # SUCCESS_STOP (terminate)
+
+# Some reviewer not happy yet — fall through to triage + fix
+```
+
+### 10. Triage (multi-login dispatch)
+
+Invoke the routine in `REVIEW-TRIAGE-COPY.md` with:
+
+- `threads = unresolved_not_ours`
+- `reviewerLogins = github_reviewer_logins`
+- `pushbackRubric = read PUSHBACK.md`
+- `mode = "unattended"`
+
+```
+triage_result = invokeReviewTriage(threads, reviewerLogins, pushbackRubric, mode="unattended")
+
+if triage_result.askUser.length > 0:
+  PushNotification("PAUSE", "ambiguous review thread; user input needed: ${triage_result.askUser[0].body[:120]}")
+  return  # PAUSE
+```
+
+### 11. Pre-commit verification + push
+
+```
+if triage_result.editsApplied > 0:
+  # Pick the profile
+  repo_basename = gh repo view --json name --jq '.name'
+  profile = config.preCommitProfiles[repo_basename]
+       OR config.preCommitProfiles["default-${detect_pm_from_lockfile()}"]
+       OR null  # no profile → skip with warning
+
+  if profile:
+    for entry in profile:
+      if entry has "if": run entry.if; skip if exit != 0
+      run entry.cmd
+      if exit != 0:
+        PushNotification("ABORT", "pre-commit check failed: ${entry.cmd} — not pushing broken code")
+        return  # ABORT
+
+  git add -A
+  git commit -m "chore(pr-autopilot): iteration ${state.fixIterations + 1} (${triage_result.editsApplied} fixes, ${triage_result.pushbacks} pushbacks)"
+  git push origin ${pr.headRefName}
+
+  state.fixIterations++
+  state.lastHandledHeadOid = $(git rev-parse HEAD)
+  state.ticksWithoutProgress = 0
+  appendPushbackReplies(state, triage_result)
+  # lastSeenReviewId updated below in 11.5
+```
+
+### 11.5 Stall guard
+
+```
+current_review_id = pr.reviews | jq 'last.id // null'
+did_anything = (triage_result.editsApplied > 0) OR (triage_result.pushbacks > 0)
+
+# Compute review_unchanged BEFORE updating lastSeenReviewId — first-tick-after-review edge case
+review_unchanged = (current_review_id != null AND current_review_id == state.lastSeenReviewId)
+
+if NOT did_anything AND review_unchanged:
+  state.ticksWithoutProgress++
+  if state.ticksWithoutProgress >= config.stallTickCap:
+    saveState($STATE_FILE)
+    PushNotification("PAUSE", "loop spinning ≥${config.stallTickCap} ticks (~9 min) with no new review and no actions taken; manual intervention needed")
+    return  # PAUSE
+else:
+  state.ticksWithoutProgress = 0
+
+if current_review_id != null:
+  state.lastSeenReviewId = current_review_id
+
+saveState($STATE_FILE)
+```
+
+### 12. Continue: schedule next tick
+
+```
+ScheduleWakeup(delaySeconds=config.pollIntervalSeconds,
+                prompt="/loop /pr-autopilot-step ${prNumber}",
+                reason="polling for reviewer re-review")
+return  # loop continues
+```
+
+## Stop conditions summary
+
+| Condition | Step | Outcome |
+|---|---|---|
+| Config: no per-iter reviewer enabled | pre-flight | ABORT (terminate without ScheduleWakeup) |
+| PR closed or merged | 2 | SUCCESS_STOP |
+| PR targets dev/master/main directly | 3 | ABORT |
+| `fixIterationCap` fix cap | 4 | ABORT |
+| CI failed on our last push | 5 | ABORT |
+| `pollTickCap` ticks without any per-iter reviewer reviewing | 8 | ABORT |
+| All per-iter reviewers report success AND all final-pass reviewers agree | 9b | SUCCESS_STOP |
+| ≥50 review threads (likely truncation) | 6 | PAUSE |
+| Triage flagged ASK_USER | 10 | PAUSE |
+| Local pre-commit suite failed | 11 | ABORT |
+| `stallTickCap` ticks with same review and zero actions (stall) | 11.5 | PAUSE |
+| Final-pass reviewer disagrees | 9a | PAUSE |
+
+## See also
+
+- [`PUSHBACK.md`](PUSHBACK.md) — judgment rubric for triage (step 10)
+- [`REVIEW-TRIAGE-COPY.md`](REVIEW-TRIAGE-COPY.md) — multi-login fetch/classify/reply routine
+- [`reviewers/CURSOR-SETUP.md`](reviewers/CURSOR-SETUP.md) — one-time Cursor setup
+- [`reviewers/COPILOT-SETUP.md`](reviewers/COPILOT-SETUP.md) — Copilot adapter modes
+- [`EVAL.md`](EVAL.md) — test scenarios + Phase 1 gating
+- [`docs/DESIGN.md`](docs/DESIGN.md) — full architecture spec

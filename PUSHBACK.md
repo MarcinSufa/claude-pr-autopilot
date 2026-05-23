@@ -1,6 +1,6 @@
 # PUSHBACK Rubric — when to apply vs push back vs ask user
 
-This file is read by `/pr-autopilot-step` during algorithm step 10 (triage). For each unresolved reviewer comment, Claude must classify the action: **apply the fix**, **push back with reasoning**, or **PAUSE for user input**.
+This file is read by `/pr-autopilot:step` during algorithm step 10 (triage). For each unresolved reviewer comment, Claude must classify the action: **apply the fix**, **push back with reasoning**, or **PAUSE for user input**.
 
 This rubric is reviewer-agnostic — applies whether the comment came from Cursor, Copilot, Codex, or any future reviewer.
 

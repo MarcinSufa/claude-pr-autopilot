@@ -9,7 +9,6 @@
   "homepage": "https://github.com/MarcinSufa/claude-pr-autopilot",
   "repository": "https://github.com/MarcinSufa/claude-pr-autopilot",
   "license": "MIT",
-  "skills": "./",
   "keywords": [
     "github",
     "pull-request",

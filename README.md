@@ -21,7 +21,7 @@ A Claude Code marketplace plugin that closes the PR review→fix loop. Cursor re
 After creating a PR (via `/ship` or `gh pr create`):
 
 ```
-/loop /pr-autopilot-step <PR_NUMBER>
+/loop /pr-autopilot:step <PR_NUMBER>
 ```
 
 The loop runs unattended until success or a safety guard fires. See [`SKILL.md`](SKILL.md) for the full algorithm and [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture spec (8 review rounds; CLEARED by Composer 2.5).

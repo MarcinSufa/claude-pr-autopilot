@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "pr-autopilot",
-      "description": "Open a PR, run /loop /pr-autopilot-step <PR#>, walk away. Enabled reviewers review (default: Cursor each iter + Copilot final-only). Claude reads each review and either fixes or pushes back with reasoning, pushes, waits for re-review. Exits when all per-iter reviewers report success (with 10 independent safety stops). Optionally pings @copilot for a final sanity check.",
+      "description": "Open a PR, run /loop /pr-autopilot:step <PR#>, walk away. Enabled reviewers review (default: Cursor each iter + Copilot final-only). Claude reads each review and either fixes or pushes back with reasoning, pushes, waits for re-review. Exits when all per-iter reviewers report success (with 10 independent safety stops). Optionally pings @copilot for a final sanity check.",
       "author": {"name": "Marcin Sufa"},
       "source": "./",
       "category": "productivity",

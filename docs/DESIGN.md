@@ -7,7 +7,7 @@
 
 ## Summary
 
-A Claude Code plugin (`pr-autopilot`, distributed as the `claude-pr-autopilot` repo) that closes the loop between PR review and Claude-driven fixes via a pluggable reviewer-adapter framework. **Phase 1 (this spec):** user invokes `/loop /pr-autopilot-step <PR#>` manually after `/ship`. Each tick fetches the latest reviews from all enabled per-iteration reviewers (default: Cursor's GitHub App; Copilot as final-pass), applies fixes or pushes back on disagreements, commits, pushes, and waits for the next round. Exits when ALL enabled per-iteration reviewers report success AND any final-pass reviewers agree, with ten safety stops along the way (caps on fix iterations, poll ticks, no-progress stall, plus config-validation/CI/branch/lint/PR-state guards). **v0.1.0 scope:** multi-reviewer adapter framework, with only two configurations gated by EVAL — default (Cursor + Copilot-final) and one alt (Copilot each-iter, scenario 17). Codex CLI and `claudeSelf` adapters are spec'd but experimental. **Phase 2:** add a Stop hook in `~/.claude/settings.json` that auto-invokes the loop after `/ship` completes — only after Phase 1 passes the gating EVAL scenarios.
+A Claude Code plugin (`pr-autopilot`, distributed as the `claude-pr-autopilot` repo) that closes the loop between PR review and Claude-driven fixes via a pluggable reviewer-adapter framework. **Phase 1 (this spec):** user invokes `/loop /pr-autopilot:step <PR#>` manually after `/ship`. Each tick fetches the latest reviews from all enabled per-iteration reviewers (default: Cursor's GitHub App; Copilot as final-pass), applies fixes or pushes back on disagreements, commits, pushes, and waits for the next round. Exits when ALL enabled per-iteration reviewers report success AND any final-pass reviewers agree, with ten safety stops along the way (caps on fix iterations, poll ticks, no-progress stall, plus config-validation/CI/branch/lint/PR-state guards). **v0.1.0 scope:** multi-reviewer adapter framework, with only two configurations gated by EVAL — default (Cursor + Copilot-final) and one alt (Copilot each-iter, scenario 17). Codex CLI and `claudeSelf` adapters are spec'd but experimental. **Phase 2:** add a Stop hook in `~/.claude/settings.json` that auto-invokes the loop after `/ship` completes — only after Phase 1 passes the gating EVAL scenarios.
 
 Runs on the user's existing Claude Code subscription and Cursor subscription. **No Anthropic API key required. No GitHub Action required. No webhook server required.**
 
@@ -37,7 +37,7 @@ claude-pr-autopilot/
 ├── LICENSE                      ← MIT
 ├── README.md                    ← marketing + walkthrough + badges (mirrors claude-watch-video style)
 ├── ROADMAP.md                   ← leverage-ranked future improvements (Phase 2, multi-PR mode, cloud routine, etc.)
-├── SKILL.md                     ← the skill entry: /pr-autopilot-step <PR#>, callable by /loop dynamic mode
+├── SKILL.md                     ← the skill entry: /pr-autopilot:step <PR#>, callable by /loop dynamic mode
 ├── PUSHBACK.md                  ← reviewer-comment judgment rubric (shared across reviewers)
 ├── REVIEW-TRIAGE-COPY.md        ← copy + parameterization of gstack/review/greptile-triage.md (now multi-login dispatching)
 ├── reviewers/                   ← per-reviewer adapters and setup docs (v5 multi-reviewer)
@@ -68,7 +68,6 @@ claude-pr-autopilot/
   "homepage": "https://github.com/MarcinSufa/claude-pr-autopilot",
   "repository": "https://github.com/MarcinSufa/claude-pr-autopilot",
   "license": "MIT",
-  "skills": "./",
   "keywords": [
     "github",
     "pull-request",
@@ -96,7 +95,7 @@ claude-pr-autopilot/
   "plugins": [
     {
       "name": "pr-autopilot",
-      "description": "Open a PR, run /loop /pr-autopilot-step <PR#>, walk away. Cursor reviews, Claude reads the review and either fixes or pushes back with reasoning, pushes, waits for Cursor to re-review. Exits when Cursor scores 5/5 (with 10 independent safety stops). Optionally pings @copilot for a final sanity check.",
+      "description": "Open a PR, run /loop /pr-autopilot:step <PR#>, walk away. Cursor reviews, Claude reads the review and either fixes or pushes back with reasoning, pushes, waits for Cursor to re-review. Exits when Cursor scores 5/5 (with 10 independent safety stops). Optionally pings @copilot for a final sanity check.",
       "author": {"name": "Marcin Sufa"},
       "source": "./",
       "category": "productivity",
@@ -113,11 +112,11 @@ claude-pr-autopilot/
 /plugin install pr-autopilot@claude-pr-autopilot
 ```
 
-After install, files land at `~/.claude/plugins/marketplaces/claude-pr-autopilot/plugins/pr-autopilot/`. The slash command `/pr-autopilot-step <PR#>` becomes available in any Claude Code session.
+After install, files land at `~/.claude/plugins/marketplaces/claude-pr-autopilot/plugins/pr-autopilot/`. The slash command `/pr-autopilot:step <PR#>` becomes available in any Claude Code session.
 
 ### Versioning policy
 
-- **0.1.0** — Phase 1 v1: manual `/loop /pr-autopilot-step <PR#>` after `/ship`. EVAL gating scenarios (1, 4, 8, 11, 17) not yet run on real PR.
+- **0.1.0** — Phase 1 v1: manual `/loop /pr-autopilot:step <PR#>` after `/ship`. EVAL gating scenarios (1, 4, 8, 11, 17) not yet run on real PR.
 - **0.2.0 – 0.x.0** — bug fixes from real-PR runs; cursor login string verified and committed; minor algorithm refinements.
 - **1.0.0** — Phase 1 gating scenarios (1, 4, 8, 11) verified passing on real exo-vault PR. Stable manual API.
 - **1.1.0+** — Phase 2: Stop hook auto-chain in `~/.claude/settings.json` after `/ship`.
@@ -189,8 +188,8 @@ The filename `2026-05-23-grep-loop-skill-design.md` is preserved despite the ren
 
 | Phase | Scope | Gate to next phase |
 |---|---|---|
-| **Phase 1** | `pr-autopilot-step` skill + `PUSHBACK.md` + `REVIEW-TRIAGE-COPY.md` (multi-login) + `reviewers/CURSOR-SETUP.md` + `reviewers/COPILOT-SETUP.md` + multi-reviewer config schema + `EVAL.md` (scenarios 1, 4, 8, 11, 17 gated; 18, 19, 20a, 20b spec'd not gated). **Manual invocation only**: user types `/loop /pr-autopilot-step <PR#>` after `/ship`. Stubs (empty in v0.1.0): `reviewers/CODEX-SETUP.md`, `reviewers/CLAUDE-SELF-SETUP.md`, `SELF-REVIEW-RUBRIC.md`, `SHIP-INTEGRATION.md`. | EVAL scenarios 1, 4, 8, 11, **17** pass on a real exo-vault PR. Confirm actual Cursor and Copilot GitHub App logins via EVAL step 0 and update config defaults. |
-| **Phase 2** | Add Stop hook in `~/.claude/settings.json` that detects `gh pr create` in recent tool calls, extracts PR#, and auto-invokes `/loop /pr-autopilot-step <PR#>`. Per-session disable via `PR_AUTOPILOT_DISABLE=1`. | N/A — production. |
+| **Phase 1** | `skills/step/SKILL.md` (the `/pr-autopilot:step` skill) + `PUSHBACK.md` + `REVIEW-TRIAGE-COPY.md` (multi-login) + `reviewers/CURSOR-SETUP.md` + `reviewers/COPILOT-SETUP.md` + multi-reviewer config schema + `EVAL.md` (scenarios 1, 4, 8, 11, 17 gated; 18, 19, 20a, 20b spec'd not gated). **Manual invocation only**: user types `/loop /pr-autopilot:step <PR#>` after `/ship`. Stubs (empty in v0.1.0): `reviewers/CODEX-SETUP.md`, `reviewers/CLAUDE-SELF-SETUP.md`, `SELF-REVIEW-RUBRIC.md`, `SHIP-INTEGRATION.md`. | EVAL scenarios 1, 4, 8, 11, **17** pass on a real exo-vault PR. Confirm actual Cursor and Copilot GitHub App logins via EVAL step 0 and update config defaults. |
+| **Phase 2** | Add Stop hook in `~/.claude/settings.json` that detects `gh pr create` in recent tool calls, extracts PR#, and auto-invokes `/loop /pr-autopilot:step <PR#>`. Per-session disable via `PR_AUTOPILOT_DISABLE=1`. | N/A — production. |
 
 Composer's gate rationale (adopted): **the Stop hook is the highest-risk integration (unattended commits firing without user present); prove the core judgment loop works first.**
 
@@ -199,15 +198,15 @@ Composer's gate rationale (adopted): **the Stop hook is the highest-risk integra
 | Actor | Responsibility | Where it runs |
 |---|---|---|
 | `/ship` (existing gstack skill) | Tests pass → bump VERSION → commit → push → create PR | User's Claude Code window |
-| User (Phase 1) or Stop hook (Phase 2) | Invoke `/loop /pr-autopilot-step <PR#>` after `/ship` | User's Claude Code window |
-| `/loop` (existing Claude Code skill, **dynamic mode**) | Run `/pr-autopilot-step <PR#>`; when inner calls `ScheduleWakeup`, fire again at the scheduled time; when inner omits the call, exit | Claude Code harness |
-| `/pr-autopilot-step <PR#>` (NEW skill) | One iteration: fetch review → triage via shared pattern → fix/push-back → commit → push → either call `ScheduleWakeup(90s, …)` to continue or omit to STOP | User's Claude Code window |
-| **Shared `review-triage` pattern** | Reviewer-agnostic fetch/classify/reply/suppress/escalate. **Wraps `c:/Users/sufam/.claude/skills/gstack/review/greptile-triage.md`**; `/pr-autopilot-step` invokes it with multi-login dispatch (one or more reviewer logins from per-iter reviewers) + per-reviewer score parser. | Subroutine of `/pr-autopilot-step` |
+| User (Phase 1) or Stop hook (Phase 2) | Invoke `/loop /pr-autopilot:step <PR#>` after `/ship` | User's Claude Code window |
+| `/loop` (existing Claude Code skill, **dynamic mode**) | Run `/pr-autopilot:step <PR#>`; when inner calls `ScheduleWakeup`, fire again at the scheduled time; when inner omits the call, exit | Claude Code harness |
+| `/pr-autopilot:step <PR#>` (NEW skill) | One iteration: fetch review → triage via shared pattern → fix/push-back → commit → push → either call `ScheduleWakeup(90s, …)` to continue or omit to STOP | User's Claude Code window |
+| **Shared `review-triage` pattern** | Reviewer-agnostic fetch/classify/reply/suppress/escalate. **Wraps `c:/Users/sufam/.claude/skills/gstack/review/greptile-triage.md`**; `/pr-autopilot:step` invokes it with multi-login dispatch (one or more reviewer logins from per-iter reviewers) + per-reviewer score parser. | Subroutine of `/pr-autopilot:step` |
 | State file at `~/.pr-autopilot/<owner>-<repo>-<pr>.json` | Persists fix-iteration count, poll-tick count, stall-tick count, last-handled-headOid, last-seen-review-id, history of pushback replies | Local FS |
-| **Reviewer adapters (v5)** | Pluggable backends each with the 5-op contract (`trigger`, `fetchOutcome`, `isSuccess`, `postPushback`, `description`). Dispatched per `config.reviewers` entry: `cursor` (GH App), `copilot` (GH App with @copilot trigger), `codex` (local CLI), `claudeSelf` (internal). See "Reviewer adapters" section. | Subroutines of `/pr-autopilot-step` |
+| **Reviewer adapters (v5)** | Pluggable backends each with the 5-op contract (`trigger`, `fetchOutcome`, `isSuccess`, `postPushback`, `description`). Dispatched per `config.reviewers` entry: `cursor` (GH App), `copilot` (GH App with @copilot trigger), `codex` (local CLI), `claudeSelf` (internal). See "Reviewer adapters" section. | Subroutines of `/pr-autopilot:step` |
 | Cursor GitHub App | Auto-review every push on enrolled repos; emit `Score: N/5` line per `reviewers/CURSOR-SETUP.md` instructions. Underlying model is Cursor config (Composer 2.5 / GPT-5.5 / Codex / Claude). | Cursor cloud infra |
 | GitHub Copilot (review service) | Review on demand when a PR comment mentions `@copilot please review`. Posts line-level threads + summary. Mode (each-iter / final-only / off) per config. | GitHub-side, free with Copilot seat |
-| `gh` + `jq` CLIs | All GitHub I/O and JSON parsing | Subprocesses of `/pr-autopilot-step` |
+| `gh` + `jq` CLIs | All GitHub I/O and JSON parsing | Subprocesses of `/pr-autopilot:step` |
 | `PushNotification` tool (Claude Code built-in) | Desktop notification when loop terminates with success or PAUSE | Claude Code harness |
 
 ## Reviewer adapters (multi-reviewer model, v5)
@@ -302,15 +301,15 @@ Other combinations (Codex primary, Cursor+Copilot dual per-iter, Claude-self fin
 
 ## Loop integration contract (Composer's P0 #1)
 
-`/loop` is used in **dynamic mode** — no interval argument. The inner skill (`/pr-autopilot-step`) drives the schedule:
+`/loop` is used in **dynamic mode** — no interval argument. The inner skill (`/pr-autopilot:step`) drives the schedule:
 
 ```
-User (or Stop hook): /loop /pr-autopilot-step 123
+User (or Stop hook): /loop /pr-autopilot:step 123
 
-→ Claude Code harness invokes /pr-autopilot-step 123
+→ Claude Code harness invokes /pr-autopilot:step 123
 → Skill runs one iteration
 → At end of iteration, skill either:
-    (a) calls ScheduleWakeup(delaySeconds=90, prompt="/loop /pr-autopilot-step 123",
+    (a) calls ScheduleWakeup(delaySeconds=90, prompt="/loop /pr-autopilot:step 123",
                              reason="polling for reviewer re-review")
         → harness wakes the skill 90s later; loop continues
     (b) does NOT call ScheduleWakeup
@@ -319,7 +318,7 @@ User (or Stop hook): /loop /pr-autopilot-step 123
 
 **This replaces** the earlier `CONTINUE | STOP | ABORT | PAUSE` return-string concept. The contract uses primitives that already exist in the Claude Code tool registry — `ScheduleWakeup` is documented and supported in `/loop` dynamic mode. The skill body still tracks four logical outcomes internally (continue / success-stop / abort / pause), but the externalization to `/loop` is purely "call ScheduleWakeup or don't."
 
-**7-day expiry footnote (`CURSOR-SETUP.md`):** Claude Code dynamic scheduled tasks expire after 7 days per the scheduled-tasks docs. With a 90s poll interval, a single `/loop /pr-autopilot-step <PR#>` invocation can theoretically tick ~6,720 times before hitting that ceiling — far beyond any reasonable PR review cycle. But document the ceiling so nobody expects an infinite babysit on a long-stalled PR, and recommend manually re-invoking if a PR sits in pushback purgatory for over a week.
+**7-day expiry footnote (`CURSOR-SETUP.md`):** Claude Code dynamic scheduled tasks expire after 7 days per the scheduled-tasks docs. With a 90s poll interval, a single `/loop /pr-autopilot:step <PR#>` invocation can theoretically tick ~6,720 times before hitting that ceiling — far beyond any reasonable PR review cycle. But document the ceiling so nobody expects an infinite babysit on a long-stalled PR, and recommend manually re-invoking if a PR sits in pushback purgatory for over a week.
 
 Outcome → action mapping:
 
@@ -383,12 +382,12 @@ User or Claude invokes /ship
 /ship: tests → VERSION bump → commit → push → gh pr create → PR #123
    │
    ▼
-   PHASE 1: User types  /loop /pr-autopilot-step 123
+   PHASE 1: User types  /loop /pr-autopilot:step 123
    PHASE 2: Stop hook auto-invokes the same command
    │
    ▼
    Tick 1 (T+0s):
-     /pr-autopilot-step 123
+     /pr-autopilot:step 123
      → load state file (none yet — create it)
      → gh pr view 123 → no cursor[bot] review yet
      → pollTicksWithoutReview = 1
@@ -418,7 +417,7 @@ User or Claude invokes /ship
 User returns → reads PR → merges manually
 ```
 
-## Algorithm: single iteration of `/pr-autopilot-step <PR#>`
+## Algorithm: single iteration of `/pr-autopilot:step <PR#>`
 
 ```
 function prAutopilotStep(prNumber):
@@ -609,7 +608,7 @@ function prAutopilotStep(prNumber):
   saveState()
 
   # 12. Continue: wait for next reviewer round
-  ScheduleWakeup(delaySeconds=90, prompt="/loop /pr-autopilot-step ${prNumber}",
+  ScheduleWakeup(delaySeconds=90, prompt="/loop /pr-autopilot:step ${prNumber}",
                   reason="waiting for reviewer re-review after push")
   return  # loop continues
 ```
@@ -660,7 +659,7 @@ Composer's P2 #7 is stronger than they realized. `c:/Users/sufam/.claude/skills/
 
 ```
 ~/.claude/plugins/marketplaces/claude-pr-autopilot/plugins/pr-autopilot/
-├── SKILL.md                    Entry: "/pr-autopilot-step <PR#>" (single iteration, called by /loop dynamic mode)
+├── SKILL.md                    Entry: "/pr-autopilot:step <PR#>" (single iteration, called by /loop dynamic mode)
 ├── PUSHBACK.md                 Judgment rubric (shared across reviewers)
 ├── REVIEW-TRIAGE-COPY.md       Multi-login dispatching fetch/classify/reply pattern (copied from gstack greptile-triage)
 ├── SELF-REVIEW-RUBRIC.md       Default rubric for the `claudeSelf` reviewer
@@ -754,7 +753,7 @@ Mapped to `c:\Users\sufam\.claude\CLAUDE.md` (global) and `c:\Users\sufam\IdeaPr
 
 | Rule | Enforcement |
 |---|---|
-| "Never commit/push unless explicitly asked" | Phase 1: user types `/loop /pr-autopilot-step <PR#>` — that IS the explicit ask. Phase 2: `/ship` is the explicit ask; Stop hook is its known downstream behavior, documented and disable-able via `PR_AUTOPILOT_DISABLE=1`. |
+| "Never commit/push unless explicitly asked" | Phase 1: user types `/loop /pr-autopilot:step <PR#>` — that IS the explicit ask. Phase 2: `/ship` is the explicit ask; Stop hook is its known downstream behavior, documented and disable-able via `PR_AUTOPILOT_DISABLE=1`. |
 | "Always verify current branch before changes" | Algorithm step 1 reads `headRefName`; step 3 aborts on dev/master/main |
 | "Feature → dev → master, never direct to master" | Step 3 ABORT |
 | "Pre-commit verification mandatory: build, mcp-build (if touched), lint, test, tsc --noEmit" | Step 11 runs the named `exo-vault` profile from `preCommitProfiles` — exactly the 5 commands above. Not just typecheck+lint. |
@@ -817,7 +816,7 @@ Coverage analysis (v5/v6): 21 test cases (1-19 + 20a + 20b) across 20 numbered s
 
 - **v0.2+ Cursor-native runtime adapter (Path C)**: spec v0.1.0 targets Claude Code as runtime (uses `/loop` dynamic mode + `ScheduleWakeup` + plugin install path under `~/.claude/plugins/marketplaces/claude-pr-autopilot/plugins/pr-autopilot/`). The user's daily-driver IDE is Cursor. Port the loop layer to Cursor's primitives (`AGENT_LOOP_TICK_*` sentinels, `.cursor/hooks.json`, Background Agent triggers) as v0.2 so the skill runs natively where the user works. Algorithm doesn't change — only the loop driver and config locations. Until then: user opens Claude Code specifically to invoke `/pr-autopilot`.
 - **Upstream review-triage core to gstack**: copy-and-modify in Phase 1, evaluate upstreaming after stability
-- **Cloud-routine variant**: lift `/pr-autopilot-step` into a `/schedule` routine so it survives laptop sleep
+- **Cloud-routine variant**: lift `/pr-autopilot:step` into a `/schedule` routine so it survives laptop sleep
 - **Multi-PR mode**: `/pr-autopilot` with no arg iterates over all open PRs
 - **Per-repo `loop-rules.md`**: autoresearch-pattern config for repo-specific priorities
 - **Webhook PUSH model**: replace polling with smee.io tunnel + local listener
@@ -830,7 +829,7 @@ Coverage analysis (v5/v6): 21 test cases (1-19 + 20a + 20b) across 20 numbered s
 | Item | Per-PR cost | Notes |
 |---|---|---|
 | Cursor review (auto on push) | ~$0 incremental | Cursor sub absorbs |
-| Claude `/pr-autopilot-step` iterations | ~3-5 turns × $0.05-0.15 = $0.15-0.75 | Claude Code sub absorbs |
+| Claude `/pr-autopilot:step` iterations | ~3-5 turns × $0.05-0.15 = $0.15-0.75 | Claude Code sub absorbs |
 | Cursor re-reviews per iteration | ~$0 incremental | Cursor sub absorbs |
 | Final Copilot review | ~$0 incremental | Copilot seat absorbs (final-only mode: 1 request/PR) |
 | **(Alt config) Copilot each-iter mode** | ~5 premium requests/PR | Copilot Pro+ ~1500 premium-req/mo quota → ~300 each-iter PRs/mo before cap; tighter on Business. Stay on final-only unless you have a reason. |
@@ -892,7 +891,7 @@ Compared to alternatives:
 | Change | Disposition | Section changed |
 |---|---|---|
 | Rename `/grep-loop` → `/pr-autopilot` | User decision (outcome-first marketing) | Title, Summary, Algorithm, References, all references throughout |
-| Slash command: `/grep-loop-step` → `/pr-autopilot-step` | Implied by rename | All algorithm and flow sections |
+| Slash command: `/grep-loop-step` → `/pr-autopilot:step` | Implied by rename | All algorithm and flow sections |
 | State file path: `~/.gstack/grep-loop/` → `~/.pr-autopilot/` | Decouple from gstack; cleaner user-home convention | State file format, Algorithm step 0 |
 | Commit prefix: `chore(grep-loop):` → `chore(pr-autopilot):` | Match new name | Algorithm step 11, End-to-end flow |
 | Env var: `GREP_LOOP_DISABLE` → `PR_AUTOPILOT_DISABLE` | Match new name | Phase 1/2 plan, Safety alignment |

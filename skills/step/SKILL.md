@@ -1,13 +1,13 @@
 ---
-name: pr-autopilot-step
-description: Automated PR review loop. Run /loop /pr-autopilot-step <PR#> after creating a PR; the skill fetches reviews from enabled reviewers, applies fixes or pushes back with reasoning, pushes commits, and waits for re-review. Stops when all enabled per-iteration reviewers report success (default: Cursor score 5/5 + Copilot final-pass 0 unresolved). Ten independent safety stops. Use when - "automate my PR review", "loop until merge-ready", "fix PR review comments automatically".
+name: step
+description: Automated PR review loop. Run /loop /pr-autopilot:step <PR#> after creating a PR; the skill fetches reviews from enabled reviewers, applies fixes or pushes back with reasoning, pushes commits, and waits for re-review. Stops when all enabled per-iteration reviewers report success (default: Cursor score 5/5 + Copilot final-pass 0 unresolved). Ten independent safety stops. Use when - "automate my PR review", "loop until merge-ready", "fix PR review comments automatically".
 ---
 
-# /pr-autopilot-step <PR_NUMBER>
+# /pr-autopilot:step <PR_NUMBER>
 
 One iteration of the PR review→fix loop. Invoked by `/loop` (Claude Code's dynamic-mode loop driver). Returns by either:
 
-- Calling `ScheduleWakeup(delaySeconds=90, prompt="/loop /pr-autopilot-step <PR_NUMBER>", reason="polling for reviewer re-review")` to continue the loop
+- Calling `ScheduleWakeup(delaySeconds=90, prompt="/loop /pr-autopilot:step <PR_NUMBER>", reason="polling for reviewer re-review")` to continue the loop
 - Omitting the `ScheduleWakeup` call to terminate the loop
 
 ## Required tools on user machine
@@ -333,7 +333,7 @@ saveState($STATE_FILE)
 
 ```
 ScheduleWakeup(delaySeconds=config.pollIntervalSeconds,
-                prompt="/loop /pr-autopilot-step ${prNumber}",
+                prompt="/loop /pr-autopilot:step ${prNumber}",
                 reason="polling for reviewer re-review")
 return  # loop continues
 ```
@@ -357,9 +357,9 @@ return  # loop continues
 
 ## See also
 
-- [`PUSHBACK.md`](PUSHBACK.md) — judgment rubric for triage (step 10)
-- [`REVIEW-TRIAGE-COPY.md`](REVIEW-TRIAGE-COPY.md) — multi-login fetch/classify/reply routine
-- [`reviewers/CURSOR-SETUP.md`](reviewers/CURSOR-SETUP.md) — one-time Cursor setup
-- [`reviewers/COPILOT-SETUP.md`](reviewers/COPILOT-SETUP.md) — Copilot adapter modes
-- [`EVAL.md`](EVAL.md) — test scenarios + Phase 1 gating
-- [`docs/DESIGN.md`](docs/DESIGN.md) — full architecture spec
+- [`PUSHBACK.md`](../../PUSHBACK.md) — judgment rubric for triage (step 10)
+- [`REVIEW-TRIAGE-COPY.md`](../../REVIEW-TRIAGE-COPY.md) — multi-login fetch/classify/reply routine
+- [`reviewers/CURSOR-SETUP.md`](../../reviewers/CURSOR-SETUP.md) — one-time Cursor setup
+- [`reviewers/COPILOT-SETUP.md`](../../reviewers/COPILOT-SETUP.md) — Copilot adapter modes
+- [`EVAL.md`](../../EVAL.md) — test scenarios + Phase 1 gating
+- [`docs/DESIGN.md`](../../docs/DESIGN.md) — full architecture spec

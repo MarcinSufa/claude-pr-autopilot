@@ -6,7 +6,7 @@ This file is a copy of `gstack/review/greptile-triage.md` (used by gstack's `/sh
 2. **Mode `unattended: true`** — never `AskUserQuestion` per comment; instead emit ASK_USER outcome which the caller translates to PAUSE.
 3. **History file path** is `~/.pr-autopilot/history/<slug>.md` — self-contained, no gstack dependency.
 
-This file is invoked by `/pr-autopilot-step` at algorithm step 10. The caller passes `reviewerLogins` (the LIST) and `mode="unattended"`.
+This file is invoked by `/pr-autopilot:step` at algorithm step 10. The caller passes `reviewerLogins` (the LIST) and `mode="unattended"`.
 
 ---
 
@@ -160,7 +160,7 @@ Example:
 
 ## Output to caller
 
-Return structured outcome to `/pr-autopilot-step`:
+Return structured outcome to `/pr-autopilot:step`:
 
 ```json
 {

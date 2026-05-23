@@ -7,14 +7,14 @@ This file is a placeholder. The Phase 2 Stop hook auto-chain is documented in [`
 After running `/ship`, the user manually invokes:
 
 ```
-/loop /pr-autopilot-step <PR#>
+/loop /pr-autopilot:step <PR#>
 ```
 
 No Stop hook, no auto-chain.
 
 ## v0.2+ planned behavior (Phase 2)
 
-A Stop hook in `~/.claude/settings.json` will detect when `/ship` (or any Claude turn) ends with a `gh pr create` and auto-invoke `/loop /pr-autopilot-step <PR#>` with the just-created PR number.
+A Stop hook in `~/.claude/settings.json` will detect when `/ship` (or any Claude turn) ends with a `gh pr create` and auto-invoke `/loop /pr-autopilot:step <PR#>` with the just-created PR number.
 
 Per-session disable: `PR_AUTOPILOT_DISABLE=1` env var before running `/ship`.
 

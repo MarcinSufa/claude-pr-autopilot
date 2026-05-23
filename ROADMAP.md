@@ -4,7 +4,7 @@ Snapshot date: 2026-05-23. Revisit after each release to re-prioritise.
 
 ## v0.1.0 (pre-release, current)
 
-Manual `/loop /pr-autopilot-step <PR#>` after `/ship`. Default config: Cursor primary + Copilot final-only.
+Manual `/loop /pr-autopilot:step <PR#>` after `/ship`. Default config: Cursor primary + Copilot final-only.
 
 Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17) **must pass on a real exo-vault PR before bumping to v1.0.0**.
 
@@ -14,7 +14,7 @@ Same scope as v0.1.0 but with all five Phase 1 gating scenarios verified on a re
 
 ## v1.1.0+ — Phase 2: Stop hook auto-chain
 
-Add Stop hook in `~/.claude/settings.json` that detects when `/ship` (or any Claude turn) ends with a `gh pr create` and auto-invokes `/loop /pr-autopilot-step <PR#>`. Per-session disable via `PR_AUTOPILOT_DISABLE=1`.
+Add Stop hook in `~/.claude/settings.json` that detects when `/ship` (or any Claude turn) ends with a `gh pr create` and auto-invokes `/loop /pr-autopilot:step <PR#>`. Per-session disable via `PR_AUTOPILOT_DISABLE=1`.
 
 Requires the manual loop (v1.0.0) to have proven stable on at least 10 real PRs first.
 

@@ -72,7 +72,7 @@ The `/pr-autopilot` loop runs in your local Claude Code window via `/loop` dynam
 
 ## ⚠ 7-day expiry
 
-Claude Code dynamic scheduled tasks expire after 7 days (per Claude Code's scheduled-tasks documentation). With 90s polling, that's ~6,720 ticks — far beyond any reasonable PR review cycle. But if a PR sits in pushback purgatory for over a week, manually re-invoke `/loop /pr-autopilot-step <PR#>`.
+Claude Code dynamic scheduled tasks expire after 7 days (per Claude Code's scheduled-tasks documentation). With 90s polling, that's ~6,720 ticks — far beyond any reasonable PR review cycle. But if a PR sits in pushback purgatory for over a week, manually re-invoke `/loop /pr-autopilot:step <PR#>`.
 
 ## Cost
 

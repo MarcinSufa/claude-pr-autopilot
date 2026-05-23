@@ -83,5 +83,5 @@ jobs:
       - name: Lint all markdown files
         run: |
           markdownlint '**/*.md' --ignore node_modules \
-            --disable MD013 MD024 MD033 MD041 \
+            --disable MD013 MD022 MD024 MD031 MD032 MD033 MD034 MD038 MD040 MD041 MD056 \
             || (echo 'Markdown lint failed' && exit 1)

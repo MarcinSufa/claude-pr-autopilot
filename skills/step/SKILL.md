@@ -70,7 +70,39 @@ if NOT any(r.enabledForEachIter for r in {cursor, copilot, codex}):
 
 ## Algorithm: prAutopilotStep(prNumber)
 
-### 0. Load state
+### Pre-flight checks (MUST run first; ABORT cleanly on any failure)
+
+These checks were added after a v0.1.0 dry-run surfaced silent fallthroughs when prerequisites are missing. Each check returns ABORT without `ScheduleWakeup` so the loop terminates instead of retrying a doomed iteration.
+
+```bash
+# 0.1 Required CLIs present
+for cmd in gh jq git; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    PushNotification("ABORT", "Required CLI not on PATH: $cmd. See reviewers/CURSOR-SETUP.md or README.md for install instructions.")
+    return  # terminate (no ScheduleWakeup)
+  fi
+done
+
+# 0.2 In a git repo
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  PushNotification("ABORT", "Not in a git repository. cd into the repo containing PR #${prNumber} before invoking /pr-autopilot:step.")
+  return  # terminate
+fi
+
+# 0.3 `gh` is authenticated
+if ! gh auth status >/dev/null 2>&1; then
+  PushNotification("ABORT", "gh CLI not authenticated. Run: gh auth login")
+  return  # terminate
+fi
+
+# 0.4 The PR actually exists in the current repo
+if ! gh pr view ${prNumber} --json number >/dev/null 2>&1; then
+  PushNotification("ABORT", "PR #${prNumber} not found in $(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || echo 'this repo'). Verify the PR number and the current working directory.")
+  return  # terminate
+fi
+```
+
+### 0.5 Load state
 
 ```bash
 STATE_FILE="$HOME/.pr-autopilot/$(gh repo view --json owner --jq '.owner.login')-$(gh repo view --json name --jq '.name')-${prNumber}.json"
@@ -342,6 +374,10 @@ return  # loop continues
 
 | Condition | Step | Outcome |
 |---|---|---|
+| Missing CLI on PATH (gh / jq / git) | pre-flight 0.1 | ABORT |
+| Not in a git repo | pre-flight 0.2 | ABORT |
+| `gh` not authenticated | pre-flight 0.3 | ABORT |
+| PR not found in current repo | pre-flight 0.4 | ABORT |
 | Config: no per-iter reviewer enabled | pre-flight | ABORT (terminate without ScheduleWakeup) |
 | PR closed or merged | 2 | SUCCESS_STOP |
 | PR targets dev/master/main directly | 3 | ABORT |

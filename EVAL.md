@@ -17,7 +17,19 @@ Scenarios 2, 3, 5, 6, 7, 9, 10, 12, 13, 14, 15, 16, 18, 19, 20a, 20b, 21 are spe
 
 ---
 
-## Step 0 — Reviewer login discovery (MUST RUN FIRST)
+## Step 0 — Prerequisites + Reviewer login discovery (MUST RUN FIRST)
+
+### Step 0.A — Verify prerequisites
+
+Surfaced by v0.1.0 dry-run test (2026-05-23) — all CLIs must be on PATH:
+
+```bash
+gh --version && jq --version && git --version && gh auth status
+```
+
+Expected: all four succeed. If `jq` is missing on Windows: `winget install jqlang.jq` and restart shell. If `gh` is unauthenticated: `gh auth login`. See README → Prerequisites for full install table.
+
+### Step 0.B — Reviewer login discovery
 
 The spec defaults `reviewers.cursor.login` to `cursor[bot]` and `reviewers.copilot.login` to `copilot-pull-request-reviewer[bot]`, but the actual GitHub App login strings must be verified against a real PR with both reviewers enrolled. Composer flagged exact-match brittleness for Cursor in v3; same risk exists for Copilot per Composer v6.
 

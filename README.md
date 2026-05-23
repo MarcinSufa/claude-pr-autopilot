@@ -11,6 +11,20 @@ A Claude Code marketplace plugin that closes the PR review→fix loop. Cursor re
 
 ## Install
 
+### Prerequisites (one-time)
+
+Required CLIs on your PATH — the skill's pre-flight ABORTs cleanly if any are missing:
+
+| Tool | Windows | macOS | Linux (apt) |
+|---|---|---|---|
+| `gh` | `winget install GitHub.cli` | `brew install gh` | `sudo apt install gh` |
+| `jq` | `winget install jqlang.jq` | `brew install jq` | `sudo apt install jq` |
+| `git` | (usually pre-installed) | (usually pre-installed) | (usually pre-installed) |
+
+After install, restart your shell so the binaries are on PATH. Then run `gh auth login` if you haven't already.
+
+### Install the plugin
+
 ```bash
 /plugin marketplace add MarcinSufa/claude-pr-autopilot
 /plugin install pr-autopilot@claude-pr-autopilot

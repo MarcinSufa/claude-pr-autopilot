@@ -1,5 +1,5 @@
 ---
-name: pr-autopilot
+name: pr-autopilot-step
 description: Automated PR review loop. Run /loop /pr-autopilot-step <PR#> after creating a PR; the skill fetches reviews from enabled reviewers, applies fixes or pushes back with reasoning, pushes commits, and waits for re-review. Stops when all enabled per-iteration reviewers report success (default: Cursor score 5/5 + Copilot final-pass 0 unresolved). Ten independent safety stops. Use when - "automate my PR review", "loop until merge-ready", "fix PR review comments automatically".
 ---
 

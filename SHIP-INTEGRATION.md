@@ -1,4 +1,4 @@
-# /ship integration via Stop hook (Phase 2 — NOT IN v0.1.0 or v0.2)
+# /ship integration — auto-trigger (v0.3, shipped) + Stop-hook auto-chain (Phase 2, not yet)
 
 This file is a placeholder. The Phase 2 Stop hook auto-chain is documented in [`docs/DESIGN.md`](docs/DESIGN.md) but NOT IMPLEMENTED in v0.1.0 or v0.2 — it is targeted for v0.3+.
 

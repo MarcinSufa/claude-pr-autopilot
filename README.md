@@ -5,7 +5,7 @@
 [![smoketest](https://github.com/MarcinSufa/claude-pr-autopilot/actions/workflows/smoketest.yml/badge.svg)](https://github.com/MarcinSufa/claude-pr-autopilot/actions/workflows/smoketest.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
-[![Status: v0.2.0 (pre-1.0)](https://img.shields.io/badge/status-v0.2.0%20pre--1.0-blue.svg)](docs/DESIGN.md)
+[![Status: v0.3.0 (pre-1.0)](https://img.shields.io/badge/status-v0.3.0%20pre--1.0-blue.svg)](docs/DESIGN.md)
 
 A Claude Code marketplace plugin that closes the PR review→fix loop. Cursor reviews your PR (or Copilot / Codex / Claude-self — configurable), Claude reads each review and either fixes the issue or pushes back with reasoning, then pushes the fix and waits for the next round. Stops when all enabled reviewers report success — or hits one of ten independent safety guards.
 
@@ -64,7 +64,7 @@ nudge is ever missed, the manual `/pr-autopilot:step <PR#>` path still works.
 
 ## Status
 
-**v0.2.0 — two-mode rotation (pre-1.0).** Mode X + Mode Y shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them. Auto-trigger (v0.3) and auto-merge (v0.4) follow.
+**v0.3.0 — auto-trigger (pre-1.0).** Mode X + Mode Y rotation (v0.2) plus in-session auto-trigger (v0.3, beta) shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them. Auto-merge to dev (v0.4) follows.
 
 ## Setup
 

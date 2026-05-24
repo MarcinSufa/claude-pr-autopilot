@@ -84,7 +84,7 @@ gh pr view <PR#> --json reviews --jq '.reviews[].author.login' | sort -u
 | 29 | **Auto-trigger: duplicate guard** | PR already has a `~/.pr-autopilot/<repo>-<N>.json` state file | nudge's idempotency clause → Claude does NOT start a second loop |
 | 30 | **Auto-trigger: nudge ignored (fail-safe)** | hook nudges but Claude finishes /ship without acting | no error, no state corruption; manual `/pr-autopilot:step <N>` still works |
 
-25 test cases (1-19 + 20a + 20b + 21 + 22 + 23 + 24) across 23 numbered scenarios + 1 pre-flight step. 8 gating (1, 4, 8, 11, 17Y, 22, 23, 24).
+31 test cases (1-19 + 20a + 20b + 21 + 22-30, with 17 renamed 17Y) + 1 pre-flight step. 8 gating (1, 4, 8, 11, 17Y, 22, 23, 24); auto-trigger scenarios 25-30 added in v0.3.
 
 ---
 

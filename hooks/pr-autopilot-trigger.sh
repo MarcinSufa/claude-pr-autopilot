@@ -21,14 +21,14 @@ if printf '%s' "$command" | grep -qE '(^|[[:space:]])(--draft|-d)([[:space:]=]|$
   log "draft; skip"; exit 0
 fi
 
-# GATE 3 — paused (cheap; before any git work)
+# GATE 3 — paused  (intentionally checked before GATE 2: a file stat is cheaper than the git call below)
 [ -f "$HOME_DIR/paused" ] && { log "paused; skip"; exit 0; }
 
 # GATE 2 — allowlist
 [ -n "$cwd" ] || { log "no cwd; skip"; exit 0; }
 url="$(git -C "$cwd" remote get-url origin 2>/dev/null || true)"   # origin only
 [ -n "$url" ] || { log "no origin remote; skip"; exit 0; }
-repo="$(printf '%s' "$url" | sed -E 's#^.*github\.com[:/]+##; s#\.git$##')"
+repo="$(printf '%s' "$url" | sed -E 's#^.*github\.com[:/]+##; s#\.git$##; s#/+$##')"
 case "$repo" in */*) : ;; *) log "cannot parse repo from $url; skip"; exit 0 ;; esac
 allow="$HOME_DIR/allowed-repos"
 [ -f "$allow" ] || { log "no allowlist; skip"; exit 0; }

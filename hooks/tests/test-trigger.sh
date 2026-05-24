@@ -56,5 +56,22 @@ rm -f "$PR_AUTOPILOT_HOME/paused"
 out="$(printf 'not json' | bash "$SCRIPT"; echo "exit=$?")"
 check "W5 malformed -> exit 0" "exit=0" "$out"
 
+# Fix-1 regression: trailing slash in origin URL still matches allowlist
+REPO_SLASH="$TMP/slashrepo"; mkdir -p "$REPO_SLASH"; git -C "$REPO_SLASH" init -q
+git -C "$REPO_SLASH" remote add origin "https://github.com/MarcinSufa/exo-vault/"
+out="$(payload "gh pr create" "$REPO_SLASH" | bash "$SCRIPT")"
+check "trailing-slash URL still matches allowlist" '"additionalContext"' "$out"
+
+# No origin remote -> skip silently
+REPO_NOREMOTE="$TMP/noremote"; mkdir -p "$REPO_NOREMOTE"; git -C "$REPO_NOREMOTE" init -q
+out="$(payload "gh pr create" "$REPO_NOREMOTE" | bash "$SCRIPT")"
+check_empty "no origin remote -> empty" "$out"
+
+# Trailing-whitespace allowlist line still matches (hygiene)
+printf 'MarcinSufa/exo-vault   \n' > "$PR_AUTOPILOT_HOME/allowed-repos"
+out="$(payload "gh pr create" "$REPO_OK" | bash "$SCRIPT")"
+check "trailing-whitespace allowlist line matches" '"additionalContext"' "$out"
+printf 'MarcinSufa/exo-vault\n' > "$PR_AUTOPILOT_HOME/allowed-repos"  # restore
+
 echo "---"; echo "pass=$pass fail=$fail"
 [ "$fail" = "0" ]

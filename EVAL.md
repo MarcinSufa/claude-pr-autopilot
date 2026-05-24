@@ -81,7 +81,7 @@ gh pr view <PR#> --json reviews --jq '.reviews[].author.login' | sort -u
 | 26 | **Auto-trigger: draft skip** | `gh pr create --draft` (and `-d`) in an allowed repo | Gate 1 fires; no nudge |
 | 27 | **Auto-trigger: paused** | `paused` sentinel present, allowed non-draft PR | Gate 3 fires; no nudge |
 | 28 | **Auto-trigger: happy auto-chain** (live dogfood) | allowed repo, non-draft, not paused; run `/ship` | hook nudges → Claude resolves PR# → ScheduleWakeup starts the loop → loop runs to its normal terminal state |
-| 29 | **Auto-trigger: duplicate guard** | PR already has a `~/.pr-autopilot/<repo>-<N>.json` state file | nudge's idempotency clause → Claude does NOT start a second loop |
+| 29 | **Auto-trigger: duplicate guard** | PR already has a `~/.pr-autopilot/<owner>-<repo>-<N>.json` state file | nudge's idempotency clause → Claude does NOT start a second loop |
 | 30 | **Auto-trigger: nudge ignored (fail-safe)** | hook nudges but Claude finishes /ship without acting | no error, no state corruption; manual `/pr-autopilot:step <N>` still works |
 
 31 test cases (1-19 + 20a + 20b + 21 + 22-30, with 17 renamed 17Y) + 1 pre-flight step. 8 gating (1, 4, 8, 11, 17Y, 22, 23, 24); auto-trigger scenarios 25-30 added in v0.3.

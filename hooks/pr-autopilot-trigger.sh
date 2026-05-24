@@ -16,8 +16,8 @@ cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty' 2>/dev/null || true)"
 # GATE 0 — must be `gh pr create` (correctness floor when `if` unavailable)
 printf '%s' "$command" | grep -qE '(^|[[:space:]])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)' || exit 0
 
-# GATE 1 — skip drafts (--draft, --draft=true, -d)
-if printf '%s' "$command" | grep -qE '(^|[[:space:]])(--draft|-d)([[:space:]=]|$)'; then
+# GATE 1 — skip drafts (--draft bare, --draft=true, -d bare); --draft=false must NOT be treated as draft
+if printf '%s' "$command" | grep -qE '(^|[[:space:]])(--draft([[:space:]]|$)|--draft=true|-d([[:space:]]|$))'; then
   log "draft; skip"; exit 0
 fi
 
@@ -29,7 +29,7 @@ fi
 url="$(git -C "$cwd" remote get-url origin 2>/dev/null || true)"   # origin only
 [ -n "$url" ] || { log "no origin remote; skip"; exit 0; }
 repo="$(printf '%s' "$url" | sed -E 's#^.*github\.com[:/]+##; s#(\.git)?/*$##')"
-case "$repo" in */*) : ;; *) log "cannot parse repo from $url; skip"; exit 0 ;; esac
+case "$repo" in */*) : ;; *) log "cannot parse owner/repo from origin remote; skip"; exit 0 ;; esac
 allow="$HOME_DIR/allowed-repos"
 [ -f "$allow" ] || { log "no allowlist; skip"; exit 0; }
 repo_lc="$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')"

@@ -85,5 +85,12 @@ git -C "$REPO_LC" remote add origin "https://github.com/marcinsufa/exo-vault.git
 out="$(payload "gh pr create" "$REPO_LC" | bash "$SCRIPT")"
 check "Fix2: lowercase origin matches canonical allowlist entry" '"additionalContext"' "$out"
 
+# Fix B: --draft=false is explicitly NOT a draft -> should nudge
+out="$(payload "gh pr create --draft=false" "$REPO_OK" | bash "$SCRIPT")"
+check "Fix B: --draft=false is NOT a draft (nudges)" '"additionalContext"' "$out"
+# Fix B: --draft=true IS a draft -> skip
+out="$(payload "gh pr create --draft=true" "$REPO_OK" | bash "$SCRIPT")"
+check_empty "Fix B: --draft=true -> empty" "$out"
+
 echo "---"; echo "pass=$pass fail=$fail"
 [ "$fail" = "0" ]

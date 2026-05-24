@@ -20,7 +20,7 @@ After v0.2, starting the loop is still manual: the user runs `/loop /pr-autopilo
 
 ## Architecture
 
-A **plugin-shipped `PostToolUse` hook**, matcher `"Bash"`, `if: "Bash(gh pr create)"`, runs a gate script. The script checks three gates; if all pass, it emits `additionalContext` nudging Claude to start the in-session autopilot loop on the PR it just created. Claude supplies the PR number (`gh pr view --json number -q .number`). The loop itself (Mode X / Mode Y via existing `derive_mode`) is unchanged.
+A **plugin-shipped `PostToolUse` hook**, matcher `"Bash"`, `if: "Bash(gh pr create)"`, runs a gate script. The script checks four gates (is-pr-create, draft, allowlist, paused); if all pass, it emits `additionalContext` nudging Claude to start the in-session autopilot loop on the PR it just created. Claude supplies the PR number (`gh pr view --json number -q .number`). The loop itself (Mode X / Mode Y via existing `derive_mode`) is unchanged.
 
 ```
 Claude runs `gh pr create …`
@@ -56,7 +56,7 @@ Claude runs `gh pr create …`
 ```
 (If `${CLAUDE_PLUGIN_ROOT}` is not the correct plugin-path variable for hook commands, the implementation plan resolves the actual variable/relative-path convention; the hook command MUST resolve from the installed plugin location, not a hardcoded path.)
 
-2. **`hooks/pr-autopilot-trigger.sh`** — POSIX shell + `jq` (already a required dep). Reads stdin JSON, runs the 3 gates, emits the nudge or exits 0 silently. Never blocks Claude.
+2. **`hooks/pr-autopilot-trigger.sh`** — POSIX shell + `jq` (already a required dep). Reads stdin JSON, runs the 4 gates, emits the nudge or exits 0 silently. Never blocks Claude.
 
 3. **`~/.pr-autopilot/allowed-repos`** — newline-delimited `owner/repo` allowlist. Absent or empty ⇒ trigger off everywhere (opt-in).
 
@@ -92,7 +92,7 @@ When all gates pass, the gate script emits:
 |---|---|---|
 | **0 — is-pr-create (MANDATORY)** | `tool_input.command` matches `(^\|[[:space:]])gh[[:space:]]+pr[[:space:]]+create([[:space:]]\|$)` | does NOT match → skip. **Required even with `if`** so the hook is correct on Claude Code < v2.1.85 (no `if` support → matcher fires on every Bash call; Gate 0 filters). |
 | 1 — draft | `tool_input.command` matches `(^\|[[:space:]])(--draft\|-d)([[:space:]=]\|$)` (covers `--draft`, `--draft=true`, `-d`) | matches → skip (drafts are WIP; reviewers cost quota) |
-| 2 — allowlist | `owner/repo` from `git -C "$cwd" remote get-url origin` (parse github URL; **origin only** — non-origin remotes won't match, noted in script comments), exact-match against `~/.pr-autopilot/allowed-repos` after **line hygiene**: trim leading/trailing whitespace, skip blank lines, ignore lines without a `/` | not found / no remote / file absent → skip |
+| 2 — allowlist | `owner/repo` from `git -C "$cwd" remote get-url origin` (parse github URL; **origin only** — non-origin remotes won't match, noted in script comments), **case-insensitive match** against `~/.pr-autopilot/allowed-repos` (both the parsed `owner/repo` and each allowlist line are lowercased before comparing) after **line hygiene**: trim leading/trailing whitespace, skip blank lines, ignore lines without a `/` | not found / no remote / file absent → skip |
 | 3 — paused | existence of `~/.pr-autopilot/paused` | exists → skip |
 
 All gates are skip-silent (exit 0, no stdout). Only when ALL gates pass does the script emit the nudge. **Gate 0 runs first** (cheapest, and the correctness floor for older Claude Code).
@@ -140,7 +140,7 @@ Informational only (telemetry / debugging which loops were auto- vs manually sta
 ## Deliverables checklist
 
 - [ ] `hooks/hooks.json` — PostToolUse `if:Bash(gh pr create)` config
-- [ ] `hooks/pr-autopilot-trigger.sh` — gate script (3 gates, exit-0-on-error, emits nudge)
+- [ ] `hooks/pr-autopilot-trigger.sh` — gate script (4 gates, exit-0-on-error, emits nudge)
 - [ ] `skills/allow/SKILL.md` (or command file) — `/pr-autopilot:allow`
 - [ ] `skills/pause/SKILL.md` + `skills/resume/SKILL.md` — `/pr-autopilot:pause` / `:resume`
 - [ ] Loop state: set `autoTriggered` / `triggerSource` when started via nudge (small SKILL.md addition)

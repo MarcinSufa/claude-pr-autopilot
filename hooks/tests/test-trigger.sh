@@ -73,5 +73,17 @@ out="$(payload "gh pr create" "$REPO_OK" | bash "$SCRIPT")"
 check "trailing-whitespace allowlist line matches" '"additionalContext"' "$out"
 printf 'MarcinSufa/exo-vault\n' > "$PR_AUTOPILOT_HOME/allowed-repos"  # restore
 
+# Fix-1 regression: .git WITH trailing slash still parses + matches
+REPO_GITSLASH="$TMP/gitslash"; mkdir -p "$REPO_GITSLASH"; git -C "$REPO_GITSLASH" init -q
+git -C "$REPO_GITSLASH" remote add origin "https://github.com/MarcinSufa/exo-vault.git/"
+out="$(payload "gh pr create" "$REPO_GITSLASH" | bash "$SCRIPT")"
+check "Fix1: .git/ trailing slash matches allowlist" '"additionalContext"' "$out"
+
+# Fix-2 regression: case-insensitive allowlist match (lowercase origin vs canonical entry)
+REPO_LC="$TMP/lcrepo"; mkdir -p "$REPO_LC"; git -C "$REPO_LC" init -q
+git -C "$REPO_LC" remote add origin "https://github.com/marcinsufa/exo-vault.git"
+out="$(payload "gh pr create" "$REPO_LC" | bash "$SCRIPT")"
+check "Fix2: lowercase origin matches canonical allowlist entry" '"additionalContext"' "$out"
+
 echo "---"; echo "pass=$pass fail=$fail"
 [ "$fail" = "0" ]

@@ -28,22 +28,23 @@ fi
 [ -n "$cwd" ] || { log "no cwd; skip"; exit 0; }
 url="$(git -C "$cwd" remote get-url origin 2>/dev/null || true)"   # origin only
 [ -n "$url" ] || { log "no origin remote; skip"; exit 0; }
-repo="$(printf '%s' "$url" | sed -E 's#^.*github\.com[:/]+##; s#\.git$##; s#/+$##')"
+repo="$(printf '%s' "$url" | sed -E 's#^.*github\.com[:/]+##; s#(\.git)?/*$##')"
 case "$repo" in */*) : ;; *) log "cannot parse repo from $url; skip"; exit 0 ;; esac
 allow="$HOME_DIR/allowed-repos"
 [ -f "$allow" ] || { log "no allowlist; skip"; exit 0; }
+repo_lc="$(printf '%s' "$repo" | tr '[:upper:]' '[:lower:]')"
 match=0
 while IFS= read -r line || [ -n "$line" ]; do
   line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"  # trim
   [ -z "$line" ] && continue                                                       # skip blank
   case "$line" in */*) : ;; *) continue ;; esac                                    # require slash
-  [ "$line" = "$repo" ] && { match=1; break; }
+  line_lc="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')"
+  [ "$line_lc" = "$repo_lc" ] && { match=1; break; }
 done < "$allow"
 [ "$match" = "1" ] || { log "repo $repo not allowed; skip"; exit 0; }
 
 # All gates passed — emit nudge. Claude supplies the PR number.
-statekey="$(printf '%s' "$repo" | tr '/' '-')"
-nudge="pr-autopilot auto-trigger: you just created a PR in ${repo} (an allowed repo). When you finish your current task (e.g. /ship), start the autopilot loop on it: (1) resolve the PR number with \`gh pr view --json number -q .number\` on the current branch; (2) if ${HOME_DIR}/${statekey}-<N>.json already exists, a loop is already running for it — do NOT start a second; (3) otherwise call ScheduleWakeup(delaySeconds=30, prompt='/loop /pr-autopilot:step <N>', reason='autopilot auto-start'). Do not begin unrelated work to start this loop."
+nudge="pr-autopilot auto-trigger: you just created a PR in ${repo} (an allowed repo). When you finish your current task (e.g. /ship), start the autopilot loop on it: (1) resolve the PR number with \`gh pr view --json number -q .number\` on the current branch; (2) before starting, check whether a loop is already running for this PR: resolve the canonical repo with \`gh repo view --json nameWithOwner -q .nameWithOwner\`, and if \`~/.pr-autopilot/<owner>-<name>-<N>.json\` (owner/name from that canonical value, slashes→dashes) already exists, do NOT start a second loop; (3) otherwise call ScheduleWakeup(delaySeconds=30, prompt='/loop /pr-autopilot:step <N>', reason='autopilot auto-start'). Do not begin unrelated work to start this loop."
 jq -n --arg ctx "$nudge" '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:$ctx}}'
 log "nudged for $repo"
 exit 0

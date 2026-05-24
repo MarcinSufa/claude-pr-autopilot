@@ -12,7 +12,7 @@ Adds a repository to `~/.pr-autopilot/allowed-repos` so the auto-trigger hook wi
 1. Determine the target repo:
    - If an argument `<owner/repo>` was given, use it.
    - Else resolve the current repo: `git remote get-url origin` → parse `owner/repo` (strip `github.com[:/]` prefix and `.git` suffix). If no origin remote, STOP: "Not in a git repo with a github origin — pass an explicit owner/repo."
-2. Validate it exists AND get the canonical-cased name: `gh repo view <owner/repo> --json nameWithOwner -q .nameWithOwner`. If it fails, STOP: "Repo <owner/repo> not found or not accessible — check the name / your gh auth." **Use the returned `nameWithOwner` (GitHub's canonical casing) as the value to store** — NOT the raw user-typed argument. This guarantees it matches what the gate script computes from `git remote get-url origin` (the gate script's allowlist match is case-sensitive).
+2. Validate it exists AND get the canonical-cased name: `gh repo view <owner/repo> --json nameWithOwner -q .nameWithOwner`. If it fails, STOP: "Repo <owner/repo> not found or not accessible — check the name / your gh auth." **Use the returned `nameWithOwner` (GitHub's canonical casing) as the value to store** — NOT the raw user-typed argument. The gate script matches the allowlist **case-insensitively**, so casing differences between your `origin` URL and the stored entry are tolerated. Storing GitHub's canonical `nameWithOwner` still keeps the allowlist clean and unambiguous.
 3. Ensure the file and dedupe (write the canonical `nameWithOwner` from step 2):
    ```bash
    mkdir -p ~/.pr-autopilot

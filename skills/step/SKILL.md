@@ -874,7 +874,7 @@ return  # CONTINUE
 | Not in a git repo | pre-flight 0.2 | ABORT |
 | `gh` not authenticated | pre-flight 0.3 | ABORT |
 | PR not found in current repo | pre-flight 0.4 | ABORT |
-| Config: no per-iter reviewer enabled | pre-flight | ABORT (terminate without ScheduleWakeup) |
+| Config: no driver at all — no per-iter reviewer in {cursor,copilot,codex} AND copilotSwe.mode≠each-iter | pre-flight | ABORT_NO_DRIVER (terminate without ScheduleWakeup). NB: copilotSwe.mode=each-iter IS a Mode Y driver — not an error. |
 | Config: primaryFixer=claude conflicts with copilotSwe.mode=each-iter | pre-flight | ABORT |
 | Config: ambiguous fixer (per-iter reviewer + copilotSwe each-iter, primaryFixer=auto) | pre-flight | ABORT |
 | PR closed or merged | 2 | SUCCESS_STOP |

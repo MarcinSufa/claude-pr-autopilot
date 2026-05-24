@@ -1,5 +1,10 @@
 # `/pr-autopilot` — Automated PR Review Loop Skill
 
+> **PARTIALLY SUPERSEDED:** Mode Y / rotation behavior is now specified in
+> `docs/superpowers/specs/2026-05-23-pr-autopilot-v0.2-rotation-design.md`.
+> Sections here on auto-trigger and auto-merge remain canonical until the
+> v0.3 / v0.4 specs land.
+
 **Date:** 2026-05-23 (revised eight times — three Composer 2.5 review rounds, v4 rename + packaging, v4-final CLEARED, v5 multi-reviewer matrix, v6 stack alignment, v6-final CONDITIONAL CLEAR resolved: 8 blockers + 6 nits baked in — non-goals/Phase 1 scope/loop outcome/state-file counter/EVAL 2/ScheduleWakeup reason/Actors table/STOP pseudocode aligned with multi-reviewer reality; new config→algorithm derivation table; EVAL step 0 expanded to both Cursor and Copilot; scenario 21 covers leftover-Copilot edge case)
 **Status:** ✅ **CLEARED by Composer v6-final review** (9.5/10 design, 9.5/10 spec consistency, 9/10 Phase 1 shippability). Ready for Phase 1 implementation.
 **Type:** New Claude Code plugin, distributed as the standalone repo `claude-pr-autopilot` (installed via `/plugin marketplace add MarcinSufa/claude-pr-autopilot`)

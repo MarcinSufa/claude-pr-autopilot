@@ -65,15 +65,90 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 
 **⚠ Important: Copilot has TWO products** — `copilot` (Copilot Code Review) and `copilotSwe` (Copilot SWE Agent). They are DIFFERENT:
 - **Code Review** posts structured line-level threads. Triggered by adding `Copilot` via the requested-reviewers API (the `@copilot` mention does NOT trigger this). May require specific repo setup (rulesets or manual reviewer add) and a paid Copilot tier with Code Review enabled.
-- **SWE Agent** posts conversational top-level comments. Triggered by `@copilot please review` mention. Works out-of-box on most repos with Copilot installed. Cannot do line-level fixes; gives prose feedback only.
+- **SWE Agent** posts conversational top-level comments. Triggered by `@copilot please review` mention. Works out-of-box on most repos with Copilot installed. Applies line-level fixes by pushing commits (verified on exo-vault PR #128 — 7 fixes + a test file). Posts a conversational top-level comment alongside the commits.
 Per real-world testing (2026-05-23), SWE Agent fires more reliably on private repos. Code Review may need additional setup most users don't have. Default to `copilotSwe` if Code Review doesn't respond within 10 poll-ticks.
+
+## Mode derivation
+
+`prAutopilot.primaryFixer` (new setting, default `"auto"`):
+
+| `primaryFixer` | Resolved mode | Notes |
+|---|---|---|
+| `"claude"` | X | ABORT if `copilotSwe.mode == "each-iter"` (would conflict — see rule below). Otherwise standard Mode X. |
+| `"copilotSwe"` | Y | Force Mode Y; derive_mode returns "Y", pre-flight validates copilotSwe.mode == each-iter (ABORTs there if not). |
+| `"auto"` (default) | derived | Inspect reviewer config — see rules below. |
+
+**`primaryFixer="claude"` + `copilotSwe.mode="each-iter"` rule:** ABORT with message — "primaryFixer=claude conflicts with copilotSwe.mode=each-iter. Either set copilotSwe.mode=off (or final-only) or change primaryFixer to copilotSwe or auto." Same reasoning as `auto` case 3 below: silently ignoring a reviewer config wastes user's paid quota.
+
+**`auto` resolution rules** (first match wins):
+
+1. If `copilotSwe.mode == "each-iter"` AND `cursor.enabled == false` AND `copilot.mode != "each-iter"` AND `codex.mode != "each-iter"` → **Mode Y**
+2. Else if any of {`cursor.enabled`, `copilot.mode == "each-iter"`, `codex.mode == "each-iter"`} AND `copilotSwe.mode != "each-iter"` → **Mode X**
+3. Else if BOTH a per-iter reviewer AND `copilotSwe.mode == "each-iter"` are enabled → **ABORT** with message: "ambiguous fixer config. Set `primaryFixer` to 'claude' or 'copilotSwe' explicitly to resolve."
+4. Else (no per-iter anything) → **ABORT** with message: "no per-iter reviewer or fixer enabled; nothing would drive the loop"
+
+```python
+function derive_mode(config):
+  pf = config.primaryFixer  # default "auto"
+  swe_each = config.reviewers.copilotSwe.mode == "each-iter"
+  any_xreviewer = config.reviewers.cursor.enabled
+                  or config.reviewers.copilot.mode == "each-iter"
+                  or config.reviewers.codex.mode == "each-iter"
+
+  if pf == "claude":
+    if swe_each: return ABORT_CONFIG  # conflict — see message in pre-flight
+    return "X"
+  if pf == "copilotSwe":
+    return "Y"  # pre-flight validates copilotSwe.mode == each-iter
+  # pf == "auto"
+  if swe_each and not any_xreviewer: return "Y"
+  if any_xreviewer and not swe_each: return "X"
+  if any_xreviewer and swe_each:     return ABORT_CONFIG  # ambiguous
+  return ABORT_NO_DRIVER
+```
 
 ## Pre-flight: config validation
 
-```
-if NOT any(r.enabledForEachIter for r in {cursor, copilot, codex}):
-  PushNotification("config error", "no per-iter reviewer enabled; nothing would drive the loop")
-  return  # do not call ScheduleWakeup → loop terminates
+```python
+# Detect mode (see §"Mode derivation" above)
+mode = derive_mode(config)
+
+if mode == ABORT_CONFIG:
+  # Two ABORT_CONFIG sub-cases — distinguish by primaryFixer setting:
+  if config.primaryFixer == "claude":
+    # claude + copilotSwe.mode=each-iter conflict
+    push_notification(
+      "config error",
+      "primaryFixer=claude conflicts with copilotSwe.mode=each-iter. Either set copilotSwe.mode=off (or final-only) or change primaryFixer to copilotSwe or auto."
+    )
+  else:
+    # auto with both swe_each and any_xreviewer set — ambiguous
+    push_notification(
+      "config error",
+      "ambiguous fixer config. Set primaryFixer to 'claude' or 'copilotSwe' explicitly to resolve."
+    )
+  return  # terminate
+
+if mode == ABORT_NO_DRIVER:
+  push_notification("config error", "no per-iter reviewer or fixer enabled; nothing would drive the loop")
+  return  # terminate
+
+# reachable when primaryFixer=claude is forced with no per-iter reviewer enabled
+if mode == "X":
+  if not any(getattr(r, "enabledForEachIter", False)
+             for r in [config.reviewers.cursor,
+                       config.reviewers.copilot,
+                       config.reviewers.codex]):
+    push_notification(
+      "config error",
+      "Mode X requires at least one per-iter reviewer in {cursor, copilot, codex}"
+    )
+    return  # terminate
+
+if mode == "Y":
+  if config.reviewers.copilotSwe.mode != "each-iter":
+    push_notification("config error", "Mode Y requires copilotSwe.mode=each-iter")
+    return  # terminate
 ```
 
 ## Algorithm: prAutopilotStep(prNumber)
@@ -117,22 +192,71 @@ STATE_FILE="$HOME/.pr-autopilot/$(gh repo view --json owner --jq '.owner.login')
 if [ -f "$STATE_FILE" ]; then state = read $STATE_FILE; else state = createNew(prNumber); fi
 ```
 
+**v1→v2 state migration (run immediately after load):** if a loaded state file predates the v2 schema, map the old `pushbackReplies` key onto `threadPushbacks` so Mode X does not lose pushback history. (Mode Y handles v1 state separately — it ABORTs; see Y.0.5.)
+
+```
+if state.pushbackReplies AND NOT state.threadPushbacks:
+  state.threadPushbacks = state.pushbackReplies   # carry Mode X history forward
+# `pushbackReplies` is no longer written; it is dropped entirely in v0.3
+```
+
 State schema:
 
 ```json
 {
+  "stateSchemaVersion": 2,
   "prNumber": 0,
   "repo": "<owner>/<name>",
   "headRef": "<branch>",
+  "resolvedMode": "X" | "Y",
+  "createdAt": "<iso>",
+  "updatedAt": "<iso>",
+
   "fixIterations": 0,
   "pollTicksWithoutReview": 0,
+  "pollTicksWithoutActivity": 0,
   "ticksWithoutProgress": 0,
   "lastHandledHeadOid": "<sha>",
   "lastSeenReviewId": "<gh-review-id>",
-  "pushbackReplies": [{"threadId": "<id>", "iteration": 0, "reason": "..."}],
-  "createdAt": "<iso>",
-  "updatedAt": "<iso>"
+  "lastTriggerAt": "<iso>",
+
+  "threadPushbacks": [
+    {"threadId": "<id>", "iteration": 0, "reason": "..."}
+  ],
+
+  "commitPushbacks": [
+    {
+      "iteration": 1,
+      "atOid": "<sha>",
+      "pushbacks": [{"file": "...", "range": "...", "reason": "..."}]
+    }
+  ],
+
+  "handledOids": ["<sha>", "..."],
+  "handledCommentIds": [123456],
+  "reviewIteration": 0
 }
+```
+
+**Key changes from v0.1 state:**
+
+- `stateSchemaVersion: 2` — bumped from implicit v1 (no field). Migration: state files without `stateSchemaVersion` are treated as v1 (Mode X) and require fresh start if user switches to Mode Y.
+- `resolvedMode` — persisted on first tick; mode-drift guard (Y.0.5) aborts if config-derived mode differs from stored mode.
+- `pushbackReplies` (v0.1) → **split into** `threadPushbacks` (Mode X, was Mode X-only in practice anyway) and `commitPushbacks` (Mode Y new).
+- `handledOids`, `handledCommentIds`, `lastTriggerAt`, `pollTicksWithoutActivity`, `reviewIteration` — all Mode Y additions.
+- `handledOids` and `handledCommentIds` persist as JSON arrays but are loaded into sets at runtime (see Y.0 set-conversion lines).
+
+**Backwards-compat:** Mode X reads/writes `threadPushbacks` (renamed from `pushbackReplies`). When a v1 state file is loaded, the migration step in `### 0.5 Load state` maps `pushbackReplies` onto `threadPushbacks` so no history is lost; `pushbackReplies` is no longer written and is dropped entirely in v0.3.
+
+**Migration decision:** v1 state files (no `stateSchemaVersion` field) are treated as Mode X; if the current derived mode is Y, ABORT with a message telling the user to delete the stale state file to start fresh in Mode Y.
+
+**Mode dispatch** — after pre-flight resolves `mode` and loads state, route to the Mode Y algorithm or fall through to Mode X:
+
+```python
+# After pre-flight resolves `mode` and the mode-drift guard:
+if mode == "Y":
+  return prAutopilotStepModeY(prNumber)   # see "Algorithm: Mode Y" below
+# else fall through to Mode X (steps 1-11.5 unchanged)
 ```
 
 ### 1. Fetch PR state
@@ -286,7 +410,7 @@ else:
 ### 9. Success path (multi-reviewer aggregate)
 
 ```
-pushback_thread_ids = state.pushbackReplies | jq 'map(.threadId)'
+pushback_thread_ids = state.threadPushbacks | jq 'map(.threadId)'
 unresolved_not_ours = threads | filter where (.id NOT IN pushback_thread_ids)
 
 # Per-reviewer isSuccess (defined per-adapter):
@@ -306,7 +430,9 @@ if all_per_iter_happy AND unresolved_not_ours.length == 0:
   for r in final_pass_reviewers:
     case r.name:
       "copilot":
-        gh pr comment ${prNumber} --body "@copilot please review this PR — primary reviewers scored it ready"
+        gh api repos/{owner}/{repo}/pulls/${prNumber}/requested_reviewers \
+          -X POST -f 'reviewers[]=Copilot'
+        # NOTE: @copilot mention triggers SWE Agent, NOT Code Review (see "Copilot has TWO products")
         sleep 5 minutes (or pollInterval * 4); fetch Copilot threads
         if any unresolved Copilot thread → PAUSE
       "codex":
@@ -367,7 +493,10 @@ if triage_result.editsApplied > 0:
   state.fixIterations++
   state.lastHandledHeadOid = $(git rev-parse HEAD)
   state.ticksWithoutProgress = 0
-  appendPushbackReplies(state, triage_result)
+  state.threadPushbacks.extend([
+    {"threadId": t.id, "iteration": state.fixIterations, "reason": t.reason}
+    for t in triage_result.pushedBackThreads
+  ])
   # lastSeenReviewId updated below in 11.5
 ```
 
@@ -404,6 +533,339 @@ ScheduleWakeup(delaySeconds=config.pollIntervalSeconds,
 return  # loop continues
 ```
 
+## Algorithm: Mode Y — prAutopilotStepModeY(prNumber)
+
+### Mode Y loop overview
+
+```
+                       ┌─────────────────────────────────┐
+                       │  /pr-autopilot:step <PR#>       │
+                       │  (one tick, called by /loop)    │
+                       └─────────────────┬───────────────┘
+                                         │
+                                         v
+              Step Y.0:   pre-flight (mode-aware — see §"Pre-flight fix")
+                                         │
+                                         v
+              Step Y.0.5: mode-drift guard (see §"State schema")
+                                         │
+                                         v
+              Step Y.1:   fetch PR state (same as Mode X step 1)
+                                         │
+                                         v
+              Step Y.2:   lifecycle guard (same as Mode X step 2)
+                                         │
+                                         v
+              Step Y.3:   branch protection guard (same as Mode X step 3)
+                                         │
+                                         v
+              Step Y.4:   pushback-iteration cap (counter increments
+                          on Claude pushback comments, NOT commits)
+                                         │
+                                         v
+              Step Y.4.5: CI health check (NEW — mirror Mode X step 5)
+                          ── if required checks failed on
+                              lastHandledHeadOid (= last SWE commit
+                              we reviewed) → ABORT
+                          ── if any pending → CONTINUE wait
+                                         │
+                                         v
+              Step Y.5:   trigger SWE Agent ONLY IF never triggered
+                          (no @copilot mention from us in PR comments)
+                          ── trigger present already → skip to Y.6
+                          ── never triggered → post @copilot once,
+                              set lastTriggerAt, CONTINUE wait
+                                         │
+                                         v
+              Step Y.6:   detect SWE Agent activity since last handled
+                          (new commits OR new top-level comments
+                          since handledOids / handledCommentIds)
+                                         │
+                                         v
+              Step Y.7:   classify SWE Agent output
+                           ├─ refusal comment ("I cannot...") → ABORT
+                           ├─ new commits → step Y.8
+                           ├─ approval prose AND headRefOid unchanged
+                           │   since lastTriggerAt → step Y.10
+                           │   with PAUSE-by-default (see §note)
+                           ├─ approval prose AND headRefOid changed →
+                           │   step Y.8 (review the new commits first)
+                           └─ nothing new → idle: increment counter, save, CONTINUE wait
+                                         │
+                                         v
+              Step Y.8:   review SWE Agent's commits against PUSHBACK.md
+                          per-hunk verdict (one of):
+                           ├─ APPROVE  — no concerns
+                           ├─ PUSHBACK — minor concern, will be
+                           │             included in re-trigger
+                           └─ PAUSE    — behavior change / safety
+                                         concern; terminate, notify
+                                         │
+                                         v
+              Step Y.9:   post structured review comment with
+                          per-hunk verdicts (audit trail)
+                                         │
+                                         v
+              Step Y.10:  aggregate verdict
+                           ├─ any PAUSE → PAUSE (terminate, notify,
+                           │              KEEP state file)
+                           ├─ all APPROVE → SUCCESS_STOP (terminate,
+                           │                DELETE state file)
+                           └─ any PUSHBACK → post explicit @copilot
+                                             re-trigger referencing
+                                             this iteration's comment,
+                                             then CONTINUE
+                                         │
+                                         v
+              Step Y.11:  save state, ScheduleWakeup(pollInterval, ...)
+                          (or terminate if SUCCESS_STOP / PAUSE / ABORT)
+```
+
+### Helper functions (Mode Y)
+
+```python
+def is_refusal(body: str) -> bool:
+    """True if SWE Agent declined to act."""
+    return bool(re.search(r"(?i)(i cannot|i('m| am) unable|not able to|can't proceed|outside.*scope)", body))
+
+def is_approval_prose(body: str) -> bool:
+    """True if SWE Agent expressed approval without listing action items."""
+    return bool(re.search(r"(?i)(lgtm|looks good|no issues|ready to merge|approved|no changes needed)", body))
+```
+
+### Step-by-step (pseudocode)
+
+```python
+# Y.0 — pre-flight (see §"Pre-flight fix" below for mode-aware check)
+
+# state and STATE_FILE are loaded by the outer dispatcher (### 0.5 Load state) before this function is called; `mode` is in scope from the outer pre-flight.
+
+# JSON arrays load as lists; treat the handled-id collections as sets for O(1) membership + .update()
+state.handledOids = set(state.handledOids)
+state.handledCommentIds = set(state.handledCommentIds)
+
+# v1 state file (pre-v2 schema) reaching the Mode Y path must not silently adopt Mode Y
+if state.stateSchemaVersion is None:
+  push_notification("ABORT", "Stale v1 state file detected. Delete ~/.pr-autopilot/<owner>-<repo>-<pr>.json to start fresh in Mode Y.")
+  return  # terminate, KEEP state file so user can inspect
+
+# Y.0.5 — mode-drift guard
+if state.resolvedMode and state.resolvedMode != mode:
+  push_notification(
+    "ABORT",
+    f"mode drifted: state={state.resolvedMode}, current config={mode}. "
+    f"Either restore the original config or delete {STATE_FILE} to start fresh."
+  )
+  return  # terminate, KEEP state file (user must resolve)
+
+if not state.resolvedMode:
+  state.resolvedMode = mode  # first tick — persist
+
+# Y.1 — fetch PR state (reuse Mode X step 1)
+pr = gh.pr.view(pr_number, json=[
+  "headRefName", "baseRefName", "headRefOid",
+  "number", "state", "comments", "commits",
+  "statusCheckRollup"
+])
+
+# Initialize lastHandledHeadOid on first tick if not set:
+# baseline is the PR HEAD before our first @copilot trigger
+if not state.lastHandledHeadOid:
+  state.lastHandledHeadOid = pr.headRefOid
+
+# Y.2 — lifecycle guard (reuse Mode X step 2)
+if pr.state in {CLOSED, MERGED}:
+  delete(STATE_FILE)
+  push_notification(f"PR #{pr_number} {pr.state}", "loop done; state cleaned up")
+  return  # terminate
+
+# Y.3 — branch protection (reuse Mode X step 3)
+if pr.headRefName in {"dev", "master", "main"}:
+  push_notification("ABORT", "refusing to operate on direct dev/master/main PR")
+  delete(STATE_FILE)
+  return  # terminate
+
+# Y.4 — pushback-iteration cap
+# (Mode Y bounded resource is Claude's pushback count, not Claude commits —
+#  Claude never commits in Mode Y. SWE Agent's pushes are limited by GitHub/Copilot
+#  tier quota, not our cap.)
+if len(state.commitPushbacks) >= config.fixIterationCap:
+  push_notification(
+    "ABORT",
+    f"{config.fixIterationCap} pushback cap reached; "
+    f"SWE Agent and Claude are not converging — manual review required"
+  )
+  return  # terminate, KEEP state (so user can inspect pushback history)
+
+# Y.4.5 — CI health check (NEW; mirrors Mode X step 5)
+required_checks = [c for c in pr.statusCheckRollup if c.isRequired]
+any_failed = any(c.conclusion == "FAILURE" for c in required_checks)
+any_pending = any(c.state in {"QUEUED", "IN_PROGRESS", "PENDING"} for c in required_checks)
+
+if any_failed and pr.headRefOid == state.lastHandledHeadOid:
+  push_notification(
+    "ABORT",
+    f"CI failed on SWE Agent's last commit ({pr.headRefOid[:7]}). "
+    f"Investigate before continuing."
+  )
+  return  # terminate, KEEP state
+
+if any_pending:
+  save_state(STATE_FILE)
+  schedule_wakeup(config.pollIntervalSeconds, ...)
+  return  # CONTINUE — wait for CI to settle
+
+# Y.5 — trigger SWE Agent ONLY IF never triggered
+# (anti-spam fix from 2nd code review Blocker 1)
+# guard: lastTriggerAt is None means we have never posted a trigger
+if state.lastTriggerAt is None:
+  gh.pr.comment(pr_number, body="@copilot please review and fix any issues")
+  state.lastTriggerAt = now()
+  save_state(STATE_FILE)
+  schedule_wakeup(config.pollIntervalSeconds, ...)
+  return  # waiting for SWE Agent's first response
+
+# Y.6 — detect SWE Agent activity since last handled
+swe_login = config.reviewers.copilotSwe.login  # "copilot-swe-agent"
+new_commits = [
+  c for c in pr.commits
+  if c.author.login == swe_login
+  and c.oid not in state.handledOids
+]
+new_comments = [
+  c for c in pr.comments
+  if c.author.login == swe_login
+  and c.databaseId not in state.handledCommentIds
+  and c.createdAt > state.lastTriggerAt
+]
+
+# Y.7 — classify SWE Agent output
+if any(is_refusal(c.body) for c in new_comments):
+  refused_msg = next(c.body for c in new_comments if is_refusal(c.body))
+  push_notification("ABORT", f"SWE Agent refused: {refused_msg[:200]}")
+  delete(STATE_FILE)
+  return  # terminate
+
+if not new_commits and not new_comments:
+  state.pollTicksWithoutActivity += 1
+  if state.pollTicksWithoutActivity >= config.pollTickCap:
+    push_notification(
+      "ABORT",
+      f"SWE Agent inactive for {config.pollTickCap} ticks "
+      f"after @copilot trigger; check Copilot quota / setup"
+    )
+    delete(STATE_FILE)
+    return  # terminate
+
+  save_state(STATE_FILE)
+  schedule_wakeup(config.pollIntervalSeconds, ...)
+  return  # waiting
+
+# Reset idle counter — we have activity
+state.pollTicksWithoutActivity = 0
+
+if new_commits:
+  goto Y_8_review_commits
+
+# else: only comments, no commits
+if any(is_approval_prose(c.body) for c in new_comments):
+  if pr.headRefOid == state.lastHandledHeadOid:
+    # SWE Agent approved without changing anything since loop start.
+    # PR #127's pattern (PR body said "deliberate smells").
+    # Default to PAUSE for safety (2nd code review Medium #8).
+    state.handledCommentIds.update([c.databaseId for c in new_comments])
+    push_notification(
+      f"PR #{pr_number} PAUSED",
+      f"SWE Agent approved without commits (headRefOid unchanged). "
+      f"This is the 'PR body framed as deliberate' pattern — confirm manually."
+    )
+    save_state(STATE_FILE)
+    return  # PAUSE, KEEP state
+  else:
+    # head changed since we last handled — someone else pushed, review what's new
+    # head changed without new SWE commits in our filter — capture all unhandled commits so Y.8 tracks them
+    new_commits = [c for c in pr.commits if c.oid not in state.handledOids]
+    goto Y_8_review_commits
+
+# Neither commit nor approval-prose comment — log and idle
+state.handledCommentIds.update([c.databaseId for c in new_comments])
+save_state(STATE_FILE)
+schedule_wakeup(config.pollIntervalSeconds, ...)
+return  # CONTINUE
+
+# === Y.8 — review SWE Agent's commits against PUSHBACK.md ===
+Y_8_review_commits:
+verdicts = []  # list of (file, hunk_range, verdict, reason)
+diff = git.diff(state.lastHandledHeadOid, pr.headRefOid)
+
+for hunk in parse_diff_hunks(diff):
+  verdict, reason = apply_pushback_rubric(hunk, rubric_file="PUSHBACK.md")
+  # verdict in {APPROVE, PUSHBACK, PAUSE}
+  verdicts.append((hunk.file, hunk.range, verdict, reason))
+
+# Mark these commits handled BEFORE the verdict-driven actions
+state.lastHandledHeadOid = pr.headRefOid
+state.handledOids.update([c.oid for c in new_commits])
+state.handledCommentIds.update([c.databaseId for c in new_comments])
+
+# Y.9 — post structured review comment (audit trail on PR)
+state.reviewIteration += 1  # 1-based: first review iteration is "1"
+comment_body = format_verdict_comment(verdicts, iteration=state.reviewIteration)
+gh.pr.comment(pr_number, body=comment_body)
+
+# Y.10 — aggregate verdict
+pause_verdicts = [v for v in verdicts if v[2] == PAUSE]
+pushback_verdicts = [v for v in verdicts if v[2] == PUSHBACK]
+
+if pause_verdicts:
+  push_notification(
+    f"PR #{pr_number} PAUSED",
+    f"Behavior-change / safety concern: {pause_verdicts[0][3][:200]}"
+  )
+  save_state(STATE_FILE)  # KEEP state for user resume
+  return  # PAUSE (terminate)
+
+if not pushback_verdicts:  # all APPROVE
+  push_notification(
+    f"PR #{pr_number} ready",
+    f"Mode Y: SWE Agent fixes APPROVED by Claude (iteration {state.reviewIteration})"
+  )
+  delete(STATE_FILE)
+  return  # SUCCESS_STOP (terminate, no Mode Y final-pass in v0.2)
+
+# else: pushback_verdicts non-empty — re-trigger SWE Agent
+# (fix from 2nd code review Blocker 2 — structured review comment alone
+#  doesn't wake SWE Agent; needs explicit @copilot mention)
+state.commitPushbacks.append({
+  "iteration": state.reviewIteration,
+  "atOid": pr.headRefOid,
+  "pushbacks": [
+    {"file": v[0], "range": v[1], "reason": v[3]}
+    for v in pushback_verdicts
+  ]
+})
+gh.pr.comment(
+  pr_number,
+  body=f"@copilot please address the pushback items in the review above (iteration {state.reviewIteration})"
+)
+state.lastTriggerAt = now()
+
+# Y.11 — save state, schedule next tick
+save_state(STATE_FILE)
+schedule_wakeup(config.pollIntervalSeconds, ...)
+return  # CONTINUE
+```
+
+### Mode Y design notes
+
+**Why no final-pass in Mode Y v0.2** (resolves Blocker 5): Mode X step 9a runs final-pass reviewers (claudeSelf, Codex, Copilot Code Review) after primary success. Adding final-pass to Mode Y SUCCESS_STOP creates a multi-reviewer orchestration problem (PUSHBACK rubric applied to commits vs threads, different success signals to aggregate). Defer to v0.3 alongside the auto-trigger work — v0.3 owns reviewer-orchestration improvements.
+
+**Why pushback counter, not commit counter:** SWE Agent's pushes count against ITS own iteration cap (managed by GitHub/Copilot tier limits), not Claude's. Claude's bounded resource in Mode Y is "how many times have I posted pushback comments" — that's what `fixIterationCap` protects against (a ping-pong loop where SWE Agent keeps pushing changes that don't address Claude's concerns). `reviewIteration` and `len(commitPushbacks)` differ by one only when the most recent review was all-APPROVE — they otherwise increment together.
+
+**The "approval prose without commits → PAUSE-by-default" branch** (resolves Medium #8) handles the case where SWE Agent posts "LGTM" without pushing anything. PR #127 worked because the body said "deliberate smells" — without that signal, "LGTM with no changes" is too weak a signal to auto-succeed on. Default to PAUSE; user confirms manually.
+
+**The `is_refusal` and `is_approval_prose` heuristics** are simple regex over comment body, defined in the Helper functions (Mode Y) subsection above; simple regex over the comment body.
+
 ## Stop conditions summary
 
 | Condition | Step | Outcome |
@@ -412,7 +874,9 @@ return  # loop continues
 | Not in a git repo | pre-flight 0.2 | ABORT |
 | `gh` not authenticated | pre-flight 0.3 | ABORT |
 | PR not found in current repo | pre-flight 0.4 | ABORT |
-| Config: no per-iter reviewer enabled | pre-flight | ABORT (terminate without ScheduleWakeup) |
+| Config: no driver at all — no per-iter reviewer in {cursor,copilot,codex} AND copilotSwe.mode≠each-iter | pre-flight | ABORT_NO_DRIVER (terminate without ScheduleWakeup). NB: copilotSwe.mode=each-iter IS a Mode Y driver — not an error. |
+| Config: primaryFixer=claude conflicts with copilotSwe.mode=each-iter | pre-flight | ABORT |
+| Config: ambiguous fixer (per-iter reviewer + copilotSwe each-iter, primaryFixer=auto) | pre-flight | ABORT |
 | PR closed or merged | 2 | SUCCESS_STOP |
 | PR targets dev/master/main directly | 3 | ABORT |
 | `fixIterationCap` fix cap | 4 | ABORT |

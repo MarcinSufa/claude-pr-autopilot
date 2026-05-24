@@ -1,5 +1,7 @@
 # Review Triage — multi-login fetch / classify / reply pattern
 
+> This section applies to **Mode X** (reviewer threads). For Mode Y (SWE Agent commits), see "Mode Y triage" below.
+
 This file is a copy of `gstack/review/greptile-triage.md` (used by gstack's `/ship` and `/review`) with three parameterizations:
 
 1. **Reviewer login is a LIST** (e.g., `["cursor[bot]"]` for default config; `["cursor[bot]", "copilot-pull-request-reviewer[bot]"]` when copilot.mode=each-iter). Comments are dispatched per-thread by matching `.comments.nodes[0].author.login` against the list.
@@ -174,3 +176,29 @@ Return structured outcome to `/pr-autopilot:step`:
 ```
 
 (`askUser` is a list of comment metadata; if non-empty, caller returns PAUSE.)
+
+---
+
+## Mode Y triage — reviewing SWE Agent commits
+
+This section applies to **Mode Y** (SWE Agent commits). For Mode X (reviewer threads), see the sections above.
+
+- **Inputs:** `headOid`, `baseRef`, list of SWE Agent commits since `lastHandledHeadOid`
+- **Per-hunk decision:** for each hunk in the diff, apply PUSHBACK.md rubric — APPROVE / PUSHBACK / PAUSE
+- **Outputs:** structured `gh pr comment` body with per-change verdict + aggregate verdict
+- **When to skip thread fetch:** ALWAYS in Mode Y. SWE Agent doesn't post threads on the lines it changes; it pushes commits. Fetching reviewer threads would just pull stale Mode X data if the PR previously ran in Mode X.
+
+Example output comment template:
+
+```markdown
+## pr-autopilot Mode Y review — iteration {N}
+
+Reviewed SWE Agent commit `{shortSha}` ({M} hunks):
+
+- ✅ APPROVE — `path/to/file.ts:12-18` — typo fix
+- ✅ APPROVE — `path/to/file.ts:42-50` — return-type annotation
+- ⚠ PUSHBACK — `path/to/file.ts:88-95` — error message lost the {field} value, breaking the debug trail
+- 🛑 PAUSE — `path/to/file.ts:120-128` — `age > 18` → `age >= 18` is a behavior change. Eligibility cutoff requires human confirmation.
+
+**Aggregate:** PAUSE (1 behavior-change concern)
+```

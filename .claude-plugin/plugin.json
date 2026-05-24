@@ -1,6 +1,6 @@
 {
   "name": "pr-autopilot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Automated PR review loop: enabled reviewers review (Cursor by default), Claude fixes, iterate until merge-ready. Open PR, walk away, come back when it's 5/5.",
   "author": {
     "name": "Marcin Sufa",

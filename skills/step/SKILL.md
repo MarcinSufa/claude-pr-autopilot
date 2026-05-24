@@ -75,7 +75,7 @@ Per real-world testing (2026-05-23), SWE Agent fires more reliably on private re
 | `primaryFixer` | Resolved mode | Notes |
 |---|---|---|
 | `"claude"` | X | ABORT if `copilotSwe.mode == "each-iter"` (would conflict — see rule below). Otherwise standard Mode X. |
-| `"copilotSwe"` | Y | Force Mode Y; ABORT if `copilotSwe.mode != "each-iter"`. |
+| `"copilotSwe"` | Y | Force Mode Y; derive_mode returns "Y", pre-flight validates copilotSwe.mode == each-iter (ABORTs there if not). |
 | `"auto"` (default) | derived | Inspect reviewer config — see rules below. |
 
 **`primaryFixer="claude"` + `copilotSwe.mode="each-iter"` rule:** ABORT with message — "primaryFixer=claude conflicts with copilotSwe.mode=each-iter. Either set copilotSwe.mode=off (or final-only) or change primaryFixer to copilotSwe or auto." Same reasoning as `auto` case 3 below: silently ignoring a reviewer config wastes user's paid quota.
@@ -87,9 +87,9 @@ Per real-world testing (2026-05-23), SWE Agent fires more reliably on private re
 3. Else if BOTH a per-iter reviewer AND `copilotSwe.mode == "each-iter"` are enabled → **ABORT** with message: "ambiguous fixer config. Set `primaryFixer` to 'claude' or 'copilotSwe' explicitly to resolve."
 4. Else (no per-iter anything) → **ABORT** with message: "no per-iter reviewer or fixer enabled; nothing would drive the loop"
 
-```
+```python
 function derive_mode(config):
-  pf = config.prAutopilot.primaryFixer  # default "auto"
+  pf = config.primaryFixer  # default "auto"
   swe_each = config.reviewers.copilotSwe.mode == "each-iter"
   any_xreviewer = config.reviewers.cursor.enabled
                   or config.reviewers.copilot.mode == "each-iter"
@@ -115,7 +115,7 @@ mode = derive_mode(config)
 
 if mode == ABORT_CONFIG:
   # Two ABORT_CONFIG sub-cases — distinguish by primaryFixer setting:
-  if config.prAutopilot.primaryFixer == "claude":
+  if config.primaryFixer == "claude":
     # claude + copilotSwe.mode=each-iter conflict
     push_notification(
       "config error",
@@ -133,6 +133,7 @@ if mode == ABORT_NO_DRIVER:
   push_notification("config error", "no per-iter reviewer or fixer enabled; nothing would drive the loop")
   return  # terminate
 
+# reachable when primaryFixer=claude is forced with no per-iter reviewer enabled
 if mode == "X":
   if not any(getattr(r, "enabledForEachIter", False)
              for r in [config.reviewers.cursor,
@@ -487,6 +488,8 @@ return  # loop continues
 | `gh` not authenticated | pre-flight 0.3 | ABORT |
 | PR not found in current repo | pre-flight 0.4 | ABORT |
 | Config: no per-iter reviewer enabled | pre-flight | ABORT (terminate without ScheduleWakeup) |
+| Config: primaryFixer=claude conflicts with copilotSwe.mode=each-iter | pre-flight | ABORT |
+| Config: ambiguous fixer (per-iter reviewer + copilotSwe each-iter, primaryFixer=auto) | pre-flight | ABORT |
 | PR closed or merged | 2 | SUCCESS_STOP |
 | PR targets dev/master/main directly | 3 | ABORT |
 | `fixIterationCap` fix cap | 4 | ABORT |

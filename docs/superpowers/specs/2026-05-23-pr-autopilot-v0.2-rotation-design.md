@@ -2,6 +2,9 @@
 
 **Date:** 2026-05-23
 **Status:** Approved for implementation (revised after 2nd code review pass)
+
+> **Note:** this spec's version-plan table (which listed `/install` and `PR_AUTOPILOT_DISABLE`) is historical. The v0.3 spec is canonical for auto-trigger: plugin-shipped hook + allowlist + `paused` sentinel, no `/install`.
+
 **Author:** Marcin Sufa + Claude (with two independent review passes)
 **Branch:** `feature/v0.2-rotation`
 **Supersedes (partially):** `docs/DESIGN.md` Mode-X-only assumptions; `EVAL.md` "v0.2 follow-up required" note

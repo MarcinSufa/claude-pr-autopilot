@@ -51,6 +51,17 @@ The loop runs unattended until success or a safety guard fires. See [`skills/ste
 Set `prAutopilot.primaryFixer` to `auto` (default), `claude` (force X), or
 `copilotSwe` (force Y).
 
+### Auto-trigger (v0.3, beta)
+
+Enable the plugin, then `/pr-autopilot:allow <owner/repo>` (or no arg for the current repo).
+After that, creating a PR there (e.g. via `/ship`) auto-starts autopilot — no manual
+`/pr-autopilot:step`. Draft PRs are skipped. Pause anytime with `/pr-autopilot:pause`
+(re-enable `/pr-autopilot:resume`).
+
+It's a **best-effort in-session nudge** (Claude Code hooks can't force actions), and **beta
+until the live exo-vault dogfood (EVAL scenario 28) confirms the full auto-chain**. If the
+nudge is ever missed, the manual `/pr-autopilot:step <PR#>` path still works.
+
 ## Status
 
 **v0.2.0 — two-mode rotation (pre-1.0).** Mode X + Mode Y shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them. Auto-trigger (v0.3) and auto-merge (v0.4) follow.

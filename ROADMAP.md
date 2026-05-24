@@ -6,7 +6,7 @@ Snapshot date: 2026-05-23. Revisit after each release to re-prioritise.
 
 Manual `/loop /pr-autopilot:step <PR#>` after `/ship`. Default config: Cursor primary + Copilot final-only.
 
-Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17) **must pass on a real exo-vault PR before bumping to v1.0.0**.
+Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24 — see EVAL.md) **must pass on a real exo-vault PR before bumping to v1.0.0**.
 
 ## v0.2 — Two-mode rotation (current)
 
@@ -23,9 +23,11 @@ PostToolUse hook on `gh pr create` + install/allow slash commands + Mode Y final
 ## v0.5 / Future — Cursor-native runtime adapter (Path C)
 Port the loop layer to Cursor primitives. Algorithm unchanged; only the loop driver moves.
 
-## v1.0.0 (gated by Phase 1 EVAL)
+## v1.0.0 (stability gate)
 
-Same scope as v0.1.0 but with all five Phase 1 gating scenarios verified on a real PR. Stable manual API.
+Declares the manual API stable — no new features beyond v0.2. Gated on EVAL scenarios
+**1, 4, 8, 11, 17Y, 22, 23, 24** all passing on real exo-vault PRs (Phase 1 set + the
+v0.2 Mode Y scenarios). See EVAL.md.
 
 ## Future (no version target)
 

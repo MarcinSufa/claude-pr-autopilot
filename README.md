@@ -38,7 +38,7 @@ After creating a PR (via `/ship` or `gh pr create`):
 /loop /pr-autopilot:step <PR_NUMBER>
 ```
 
-The loop runs unattended until success or a safety guard fires. See [`SKILL.md`](SKILL.md) for the full algorithm and [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture spec (8 review rounds; CLEARED by Composer 2.5).
+The loop runs unattended until success or a safety guard fires. See [`skills/step/SKILL.md`](skills/step/SKILL.md) for the full algorithm and [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture spec (8 review rounds; CLEARED by Composer 2.5).
 
 ### Two rotation modes
 

@@ -561,7 +561,7 @@ PUSHBACK.md was written from Mode X perspective ("when to push back on a reviewe
 - [ ] `EVAL.md` — mark follow-up resolved, rename 17 → 17Y, add 22, 23, 24
 - [ ] `docs/DESIGN.md` — add partial-supersession stub at top
 - [ ] `.claude-plugin/plugin.json` — bump to `0.2.0`
-- [ ] (new file) `docs/superpowers/plans/2026-05-23-pr-autopilot-v0.2-rotation-plan.md` — implementation plan from writing-plans
+- [ ] (new file) `docs/superpowers/plans/2026-05-23-pr-autopilot-v0.2-rotation.md` — implementation plan from writing-plans
 - [ ] State-file migration logic — handle v1 state files (no `stateSchemaVersion`) gracefully
 
 **EVAL scenarios to add (gated for v1.0.0 sign-off):**

@@ -192,6 +192,14 @@ STATE_FILE="$HOME/.pr-autopilot/$(gh repo view --json owner --jq '.owner.login')
 if [ -f "$STATE_FILE" ]; then state = read $STATE_FILE; else state = createNew(prNumber); fi
 ```
 
+**v1→v2 state migration (run immediately after load):** if a loaded state file predates the v2 schema, map the old `pushbackReplies` key onto `threadPushbacks` so Mode X does not lose pushback history. (Mode Y handles v1 state separately — it ABORTs; see Y.0.5.)
+
+```
+if state.pushbackReplies AND NOT state.threadPushbacks:
+  state.threadPushbacks = state.pushbackReplies   # carry Mode X history forward
+# `pushbackReplies` is no longer written; it is dropped entirely in v0.3
+```
+
 State schema:
 
 ```json
@@ -238,7 +246,7 @@ State schema:
 - `handledOids`, `handledCommentIds`, `lastTriggerAt`, `pollTicksWithoutActivity`, `reviewIteration` — all Mode Y additions.
 - `handledOids` and `handledCommentIds` persist as JSON arrays but are loaded into sets at runtime (see Y.0 set-conversion lines).
 
-**Backwards-compat:** Mode X reads/writes `threadPushbacks` (renamed from `pushbackReplies`); the migration writes both keys for one release if v1 state is detected, then `pushbackReplies` is dropped in v0.3.
+**Backwards-compat:** Mode X reads/writes `threadPushbacks` (renamed from `pushbackReplies`). When a v1 state file is loaded, the migration step in `### 0.5 Load state` maps `pushbackReplies` onto `threadPushbacks` so no history is lost; `pushbackReplies` is no longer written and is dropped entirely in v0.3.
 
 **Migration decision:** v1 state files (no `stateSchemaVersion` field) are treated as Mode X; if the current derived mode is Y, ABORT with a message telling the user to delete the stale state file to start fresh in Mode Y.
 

@@ -49,7 +49,7 @@ Insert a new section immediately before `## Pre-flight: config validation`. Tran
 
 ```
 function derive_mode(config):
-  pf = config.prAutopilot.primaryFixer  # default "auto"
+  pf = config.primaryFixer  # default "auto" (config is the prAutopilot section, per SKILL.md convention)
   swe_each = config.reviewers.copilotSwe.mode == "each-iter"
   any_xreviewer = config.reviewers.cursor.enabled
                   or config.reviewers.copilot.mode == "each-iter"

@@ -114,8 +114,7 @@ Mode X covers the standard "human-style code review where someone else writes th
                            │   with PAUSE-by-default (see §note)
                            ├─ approval prose AND headRefOid changed →
                            │   step Y.8 (review the new commits first)
-                           └─ nothing new → step Y.11 (idle, increment
-                               pollTicksWithoutActivity)
+                           └─ nothing new → idle: increment counter, save, CONTINUE wait
                                          │
                                          v
               Step Y.8:   review SWE Agent's commits against PUSHBACK.md
@@ -146,10 +145,28 @@ Mode X covers the standard "human-style code review where someone else writes th
                           (or terminate if SUCCESS_STOP / PAUSE / ABORT)
 ```
 
+### Helper functions (Mode Y)
+
+```python
+def is_refusal(body: str) -> bool:
+    """True if SWE Agent declined to act."""
+    return bool(re.search(r"(?i)(i cannot|i('m| am) unable|not able to|can't proceed|outside.*scope)", body))
+
+def is_approval_prose(body: str) -> bool:
+    """True if SWE Agent expressed approval without listing action items."""
+    return bool(re.search(r"(?i)(lgtm|looks good|no issues|ready to merge|approved|no changes needed)", body))
+```
+
 ### Step-by-step (pseudocode)
 
 ```python
 # Y.0 — pre-flight (see §"Pre-flight fix" below for mode-aware check)
+
+# state and STATE_FILE are loaded by the outer dispatcher (### 0.5 Load state) before this function is called
+
+# JSON arrays load as lists; treat the handled-id collections as sets for O(1) membership + .update()
+state.handledOids = set(state.handledOids)
+state.handledCommentIds = set(state.handledCommentIds)
 
 # Y.0.5 — mode-drift guard
 if state.resolvedMode and state.resolvedMode != mode:
@@ -219,12 +236,7 @@ if any_pending:
 
 # Y.5 — trigger SWE Agent ONLY IF never triggered
 # (anti-spam fix from 2nd code review Blocker 1)
-already_triggered = any(
-  c.author.login == "github-actions[bot]" or c.author.login == "Marcin"  # us
-  and "@copilot" in c.body and "please review" in c.body.lower()
-  for c in pr.comments
-)
-# Simpler check: did we set lastTriggerAt yet?
+# guard: lastTriggerAt is None means we have never posted a trigger
 if state.lastTriggerAt is None:
   gh.pr.comment(pr_number, body="@copilot please review and fix any issues")
   state.lastTriggerAt = now()
@@ -290,6 +302,8 @@ if any(is_approval_prose(c.body) for c in new_comments):
     return  # PAUSE, KEEP state
   else:
     # head changed since we last handled — someone else pushed, review what's new
+    # head changed without new SWE commits in our filter — capture all unhandled commits so Y.8 tracks them
+    new_commits = [c for c in pr.commits if c.oid not in state.handledOids]
     goto Y_8_review_commits
 
 # Neither commit nor approval-prose comment — log and idle
@@ -369,7 +383,7 @@ return  # CONTINUE
 
 **The "approval prose without commits → PAUSE-by-default" branch** (resolves Medium #8) handles the case where SWE Agent posts "LGTM" without pushing anything. PR #127 worked because the body said "deliberate smells" — without that signal, "LGTM with no changes" is too weak a signal to auto-succeed on. Default to PAUSE; user confirms manually.
 
-**The `is_refusal` and `is_approval_prose` heuristics** are simple regex over comment body, already implemented in Mode X's `copilotSwe.latestCommentBody` NLP judgment helper. Reuse that helper.
+**The `is_refusal` and `is_approval_prose` heuristics** are simple regex over comment body, defined in the Helper functions (Mode Y) subsection above; simple regex over the comment body.
 
 ## Pre-flight fix (resolves Blocker 2 from 1st code review)
 
@@ -472,6 +486,7 @@ if mode == "Y":
 - `resolvedMode` — persisted on first tick; mode-drift guard (Y.0.5) aborts if config-derived mode differs from stored mode.
 - `pushbackReplies` (v0.1) → **split into** `threadPushbacks` (Mode X, was Mode X-only in practice anyway) and `commitPushbacks` (Mode Y new).
 - `handledOids`, `handledCommentIds`, `lastTriggerAt`, `pollTicksWithoutActivity`, `reviewIteration` — all Mode Y additions.
+- `handledOids` and `handledCommentIds` persist as JSON arrays but are loaded into sets at runtime (see Y.0 set-conversion lines).
 
 **Backwards-compat:** Mode X reads/writes `threadPushbacks` (renamed from `pushbackReplies`); the migration writes both keys for one release if v1 state is detected, then `pushbackReplies` is dropped in v0.3.
 

@@ -65,7 +65,7 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 
 **⚠ Important: Copilot has TWO products** — `copilot` (Copilot Code Review) and `copilotSwe` (Copilot SWE Agent). They are DIFFERENT:
 - **Code Review** posts structured line-level threads. Triggered by adding `Copilot` via the requested-reviewers API (the `@copilot` mention does NOT trigger this). May require specific repo setup (rulesets or manual reviewer add) and a paid Copilot tier with Code Review enabled.
-- **SWE Agent** posts conversational top-level comments. Triggered by `@copilot please review` mention. Works out-of-box on most repos with Copilot installed. Cannot do line-level fixes; gives prose feedback only.
+- **SWE Agent** posts conversational top-level comments. Triggered by `@copilot please review` mention. Works out-of-box on most repos with Copilot installed. Applies line-level fixes by pushing commits (verified on exo-vault PR #128 — 7 fixes + a test file). Posts a conversational top-level comment alongside the commits.
 Per real-world testing (2026-05-23), SWE Agent fires more reliably on private repos. Code Review may need additional setup most users don't have. Default to `copilotSwe` if Code Review doesn't respond within 10 poll-ticks.
 
 ## Mode derivation
@@ -418,7 +418,9 @@ if all_per_iter_happy AND unresolved_not_ours.length == 0:
   for r in final_pass_reviewers:
     case r.name:
       "copilot":
-        gh pr comment ${prNumber} --body "@copilot please review this PR — primary reviewers scored it ready"
+        gh api repos/{owner}/{repo}/pulls/${prNumber}/requested_reviewers \
+          -X POST -f 'reviewers[]=Copilot'
+        # NOTE: @copilot mention triggers SWE Agent, NOT Code Review (see "Copilot has TWO products")
         sleep 5 minutes (or pollInterval * 4); fetch Copilot threads
         if any unresolved Copilot thread → PAUSE
       "codex":

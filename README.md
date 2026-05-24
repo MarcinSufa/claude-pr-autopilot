@@ -53,7 +53,7 @@ Set `prAutopilot.primaryFixer` to `auto` (default), `claude` (force X), or
 
 ## Status
 
-**v0.1.0 — pre-release.** Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17) not yet verified on real PR. Will bump to **v1.0.0** after all five gates pass. Phase 2 (Stop hook auto-chain from `/ship`) deferred until then.
+**v0.1.0 — pre-release.** Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) not yet verified on real PR. Will bump to **v1.0.0** after all eight gates pass. Phase 2 (Stop hook auto-chain from `/ship`) deferred until then.
 
 ## Setup
 

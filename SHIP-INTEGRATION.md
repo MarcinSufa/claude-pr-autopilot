@@ -24,4 +24,4 @@ Concrete hook JSON template will be added to this file when v0.3 ships. Until th
 
 ## Why deferred
 
-Per Composer's review: the Stop hook is the highest-risk integration (unattended commits firing without user present). Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17) must pass on real PRs first to prove the core loop is safe before adding the automation layer.
+Per Composer's review: the Stop hook is the highest-risk integration (unattended commits firing without user present). Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) must pass on real PRs first to prove the core loop is safe before adding the automation layer.

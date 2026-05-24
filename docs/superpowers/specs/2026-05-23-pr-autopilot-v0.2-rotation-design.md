@@ -162,11 +162,16 @@ def is_approval_prose(body: str) -> bool:
 ```python
 # Y.0 — pre-flight (see §"Pre-flight fix" below for mode-aware check)
 
-# state and STATE_FILE are loaded by the outer dispatcher (### 0.5 Load state) before this function is called
+# state and STATE_FILE are loaded by the outer dispatcher (### 0.5 Load state) before this function is called; `mode` is in scope from the outer pre-flight.
 
 # JSON arrays load as lists; treat the handled-id collections as sets for O(1) membership + .update()
 state.handledOids = set(state.handledOids)
 state.handledCommentIds = set(state.handledCommentIds)
+
+# v1 state file (pre-v2 schema) reaching the Mode Y path must not silently adopt Mode Y
+if state.stateSchemaVersion is None:
+  push_notification("ABORT", "Stale v1 state file detected. Delete ~/.pr-autopilot/<owner>-<repo>-<pr>.json to start fresh in Mode Y.")
+  return  # terminate, KEEP state file so user can inspect
 
 # Y.0.5 — mode-drift guard
 if state.resolvedMode and state.resolvedMode != mode:

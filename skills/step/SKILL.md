@@ -242,10 +242,14 @@ State schema:
 
 **Migration decision:** v1 state files (no `stateSchemaVersion` field) are treated as Mode X; if the current derived mode is Y, ABORT with a message telling the user to delete the stale state file to start fresh in Mode Y.
 
-# After pre-flight resolves `mode` (Task 1) and the mode-drift guard (Task 2):
+**Mode dispatch** — after pre-flight resolves `mode` and loads state, route to the Mode Y algorithm or fall through to Mode X:
+
+```python
+# After pre-flight resolves `mode` and the mode-drift guard:
 if mode == "Y":
   return prAutopilotStepModeY(prNumber)   # see "Algorithm: Mode Y" below
 # else fall through to Mode X (steps 1-11.5 unchanged)
+```
 
 ### 1. Fetch PR state
 

@@ -68,12 +68,86 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 - **SWE Agent** posts conversational top-level comments. Triggered by `@copilot please review` mention. Works out-of-box on most repos with Copilot installed. Cannot do line-level fixes; gives prose feedback only.
 Per real-world testing (2026-05-23), SWE Agent fires more reliably on private repos. Code Review may need additional setup most users don't have. Default to `copilotSwe` if Code Review doesn't respond within 10 poll-ticks.
 
-## Pre-flight: config validation
+## Mode derivation
+
+`prAutopilot.primaryFixer` (new setting, default `"auto"`):
+
+| `primaryFixer` | Resolved mode | Notes |
+|---|---|---|
+| `"claude"` | X | ABORT if `copilotSwe.mode == "each-iter"` (would conflict — see rule below). Otherwise standard Mode X. |
+| `"copilotSwe"` | Y | Force Mode Y; ABORT if `copilotSwe.mode != "each-iter"`. |
+| `"auto"` (default) | derived | Inspect reviewer config — see rules below. |
+
+**`primaryFixer="claude"` + `copilotSwe.mode="each-iter"` rule:** ABORT with message — "primaryFixer=claude conflicts with copilotSwe.mode=each-iter. Either set copilotSwe.mode=off (or final-only) or change primaryFixer to copilotSwe or auto." Same reasoning as `auto` case 3 below: silently ignoring a reviewer config wastes user's paid quota.
+
+**`auto` resolution rules** (first match wins):
+
+1. If `copilotSwe.mode == "each-iter"` AND `cursor.enabled == false` AND `copilot.mode != "each-iter"` AND `codex.mode != "each-iter"` → **Mode Y**
+2. Else if any of {`cursor.enabled`, `copilot.mode == "each-iter"`, `codex.mode == "each-iter"`} AND `copilotSwe.mode != "each-iter"` → **Mode X**
+3. Else if BOTH a per-iter reviewer AND `copilotSwe.mode == "each-iter"` are enabled → **ABORT** with message: "ambiguous fixer config. Set `primaryFixer` to 'claude' or 'copilotSwe' explicitly to resolve."
+4. Else (no per-iter anything) → **ABORT** with message: "no per-iter reviewer or fixer enabled; nothing would drive the loop"
 
 ```
-if NOT any(r.enabledForEachIter for r in {cursor, copilot, codex}):
-  PushNotification("config error", "no per-iter reviewer enabled; nothing would drive the loop")
-  return  # do not call ScheduleWakeup → loop terminates
+function derive_mode(config):
+  pf = config.prAutopilot.primaryFixer  # default "auto"
+  swe_each = config.reviewers.copilotSwe.mode == "each-iter"
+  any_xreviewer = config.reviewers.cursor.enabled
+                  or config.reviewers.copilot.mode == "each-iter"
+                  or config.reviewers.codex.mode == "each-iter"
+
+  if pf == "claude":
+    if swe_each: return ABORT_CONFIG  # conflict — see message in pre-flight
+    return "X"
+  if pf == "copilotSwe":
+    return "Y"  # pre-flight validates copilotSwe.mode == each-iter
+  # pf == "auto"
+  if swe_each and not any_xreviewer: return "Y"
+  if any_xreviewer and not swe_each: return "X"
+  if any_xreviewer and swe_each:     return ABORT_CONFIG  # ambiguous
+  return ABORT_NO_DRIVER
+```
+
+## Pre-flight: config validation
+
+```python
+# Detect mode (see §"Mode derivation" above)
+mode = derive_mode(config)
+
+if mode == ABORT_CONFIG:
+  # Two ABORT_CONFIG sub-cases — distinguish by primaryFixer setting:
+  if config.prAutopilot.primaryFixer == "claude":
+    # claude + copilotSwe.mode=each-iter conflict
+    push_notification(
+      "config error",
+      "primaryFixer=claude conflicts with copilotSwe.mode=each-iter. Either set copilotSwe.mode=off (or final-only) or change primaryFixer to copilotSwe or auto."
+    )
+  else:
+    # auto with both swe_each and any_xreviewer set — ambiguous
+    push_notification(
+      "config error",
+      "ambiguous fixer config. Set primaryFixer to 'claude' or 'copilotSwe' explicitly to resolve."
+    )
+  return  # terminate
+
+if mode == ABORT_NO_DRIVER:
+  push_notification("config error", "no per-iter reviewer or fixer enabled; nothing would drive the loop")
+  return  # terminate
+
+if mode == "X":
+  if not any(getattr(r, "enabledForEachIter", False)
+             for r in [config.reviewers.cursor,
+                       config.reviewers.copilot,
+                       config.reviewers.codex]):
+    push_notification(
+      "config error",
+      "Mode X requires at least one per-iter reviewer in {cursor, copilot, codex}"
+    )
+    return  # terminate
+
+if mode == "Y":
+  if config.reviewers.copilotSwe.mode != "each-iter":
+    push_notification("config error", "Mode Y requires copilotSwe.mode=each-iter")
+    return  # terminate
 ```
 
 ## Algorithm: prAutopilotStep(prNumber)

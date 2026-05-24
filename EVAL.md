@@ -177,3 +177,59 @@ cd "c:/Users/sufam/IdeaProjects/claude-pr-autopilot"
 git tag -a v1.0.0 -m "Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) verified on real exo-vault PR"
 git push origin v1.0.0
 ```
+
+---
+
+## v0.2 pre-merge verification (Task 10)
+
+Date: 2026-05-24
+Branch: feature/v0.2-rotation
+
+| Check | What | Result |
+|---|---|---|
+| V1 | derive_mode truth table (12 cells) | PASS |
+| V2 | state schema round-trip | PASS |
+| V3 | v1->v2 migration documented | PASS |
+| V4 | pre-flight accepts Mode Y | PASS |
+| V5 | PUSHBACK Mode Y coverage | PASS |
+| V6 | SKILL.md contradictions gone | PASS |
+
+### V1 — derive_mode truth table
+
+Variables: `swe_each` = copilotSwe.mode=="each-iter"; `any_xreviewer` = cursor.enabled OR copilot.mode=="each-iter" OR codex.mode=="each-iter"
+
+Reviewer combos: (a) cursor only — `any_xreviewer=true, swe_each=false`; (b) copilotSwe only — `swe_each=true, any_xreviewer=false`; (c) both cursor+swe — `any_xreviewer=true, swe_each=true`; (d) nothing — both false.
+
+| primaryFixer | (a) cursor only | (b) swe only | (c) cursor+swe | (d) nothing |
+|---|---|---|---|---|
+| `claude` | X | ABORT_CONFIG (swe conflict) | ABORT_CONFIG (swe conflict) | X* |
+| `copilotSwe` | Y** | Y | Y | Y** |
+| `auto` | X | Y | ABORT_CONFIG (ambiguous) | ABORT_NO_DRIVER |
+
+\* `derive_mode` returns "X" for claude+(d), but pre-flight immediately ABORTs: "Mode X requires at least one per-iter reviewer in {cursor, copilot, codex}" — no X-reviewer is enabled. End result is an ABORT, via pre-flight not derive_mode.
+
+\*\* `derive_mode` returns "Y" for copilotSwe+{a,d}, but pre-flight immediately ABORTs: "Mode Y requires copilotSwe.mode=each-iter" — the required config is absent. End result is an ABORT, via pre-flight not derive_mode.
+
+All 12 cells are internally consistent. The two pre-flight catches (marked * and **) are expected by design — `derive_mode` is intentionally dumb about copilotSwe+{a,d} and claude+(d); pre-flight is the enforcement layer. No logic inconsistencies or surprising cells found.
+
+### V2 — state schema round-trip notes
+
+All 14 expected fields present in schema. All Mode Y pseudocode field references (handledOids, handledCommentIds, lastTriggerAt, lastHandledHeadOid, pollTicksWithoutActivity, resolvedMode, commitPushbacks, reviewIteration) resolved to schema fields without gap.
+
+### V3 — migration notes
+
+Migration prose at SKILL.md line 243-244 is unambiguous. Set-conversion lines (`state.handledOids = set(state.handledOids)`, `state.handledCommentIds = set(state.handledCommentIds)`) present in Y.0 block.
+
+### V4 — pre-flight trace for Mode Y config
+
+Config: `{primaryFixer: auto, copilotSwe.mode: each-iter, cursor.enabled: false, copilot.mode: off, codex.mode: off}`
+→ `swe_each=true`, `any_xreviewer=false` → auto rule 1 fires → `derive_mode` returns "Y"
+→ pre-flight: `copilotSwe.mode != "each-iter"` is false → no ABORT → proceeds to Mode Y body. Correct.
+
+### V5 — PUSHBACK coverage notes
+
+grep count = 17. Every rule heading carries either `(Mode X & Y)`, `(Mode X only — review threads)`, or a `**Mode Y example:**` inline. The "Behavior change without intent signal → PAUSE (Mode Y)" rule is present (PUSHBACK.md lines 46-55). Full coverage confirmed.
+
+### V6 — SKILL.md contradictions
+
+`grep -nE "Cannot do line-level fixes|please review this PR — primary reviewers scored"` returned no output. No legacy contradiction text present.

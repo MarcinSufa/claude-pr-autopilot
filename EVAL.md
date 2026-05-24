@@ -11,9 +11,9 @@ Before bumping from **v0.1.0** (pre-release) to **v1.0.0** (stable manual API), 
 - ✅ Scenario 4 — CI breaks mid-loop
 - ✅ Scenario 8 — Local pre-commit fails
 - ✅ Scenario 11 — Score 5/5 but 1 unresolved thread
-- ✅ Scenario 17 — Reviewer-mode alt: Copilot each-iter (no Cursor)
+- ✅ Scenario 17Y — Mode Y happy path: Copilot SWE Agent each-iter, no Cursor
 
-Scenarios 2, 3, 5, 6, 7, 9, 10, 12, 13, 14, 15, 16, 18, 19, 20a, 20b, 21 are spec'd but NOT GATED in v0.1.0.
+Scenarios 2, 3, 5, 6, 7, 9, 10, 12, 13, 14, 15, 16, 18, 19, 20a, 20b, 21 are spec'd but NOT GATED in v0.1.0. Scenarios 22, 23, 24 are v0.2 additions gated for v1.0.0.
 
 ---
 
@@ -68,14 +68,17 @@ gh pr view <PR#> --json reviews --jq '.reviews[].author.login' | sort -u
 | 14 | `PR_AUTOPILOT_DISABLE=1` (Phase 2) | Set env var before `/ship` | Stop hook reads env, no-ops; user can still manually invoke |
 | 15 | 50+ review threads | Open PR with massive review load | PAUSE "likely truncation"; user resumes manually after manual cleanup |
 | 16 | **No-progress stall** (Composer v2 #1) | Cursor has reviewed, score is 3/5, no new comments for multiple ticks, all open threads are already-pushed-back-on (so triage does nothing) | After 6 ticks (~9 min) with `lastSeenReviewId` unchanged AND zero edits/pushbacks → PAUSE "loop spinning ≥6 ticks with no new review and no actions taken; manual intervention needed" |
-| 17 | **Reviewer-mode alt: Copilot each-iter, no Cursor** (Phase 1 gate for multi-reviewer) | Config: `cursor.enabled=false, copilot.mode=each-iter`. Open PR. | Tick 1: skill posts `@copilot please review`; tick 2: Copilot posts 3 line comments; triage applies 2, pushes back on 1; push; tick 3: `@copilot review` re-posted; Copilot returns 0 open threads → SUCCESS_STOP. Validates reviewer-adapter abstraction. |
+| 17Y | **Mode Y happy path: Copilot SWE Agent each-iter, no Cursor** (Phase 1 gate for multi-reviewer) | Config: `cursor.enabled=false, copilot.mode=each-iter`. Open PR. | Tick 1: skill posts `@copilot please review`; tick 2: Copilot posts 3 line comments; triage applies 2, pushes back on 1; push; tick 3: `@copilot review` re-posted; Copilot returns 0 open threads → SUCCESS_STOP. Validates reviewer-adapter abstraction. |
 | 18 | **Reviewer-mode: final-pass disagreement** | Per-iter Cursor scores 5/5. Final-pass `claudeSelf` reads the diff against `SELF-REVIEW-RUBRIC.md` and finds an unaddressed concern. | PAUSE "final-pass reviewer claudeSelf disagreed with per-iter consensus" + PushNotification. User decides next move. |
 | 19 | **Config error: no per-iter reviewer enabled** | Config has all per-iter reviewers off (only `claudeSelf` as final-only enabled). | ABORT immediately at config validation: "at least one reviewer must be enabled for per-iteration; nothing would drive the loop" |
 | 20a | **Codex via Cursor as the model** (default v0.1.0 path) | `cursor.enabled=true` + user has configured Cursor Background Agent to use Codex as the underlying model (Cursor's settings, not ours) | Skill sees reviews from `cursor[bot]` with `Score: N/5`; behavior identical to scenario 1. **No new code path** — proves the model choice is transparent to `pr-autopilot`. |
 | 20b | **Codex standalone CLI, postCommentsToPR=true** (spec'd, not gated v0.1.0) | `cursor.enabled=false, codex.mode=each-iter, codex.postCommentsToPR=true`. Requires Codex Pro CLI sub. Open PR. | Skill runs `codex review --diff origin/main..HEAD` each iter; posts Codex's findings as `## Codex review (iteration N)` PR comment; processes findings internally; pass gate → SUCCESS_STOP. Gated in v0.2+. |
-| 21 | **Per-iter consensus achieved but leftover Copilot threads from earlier each-iter experiment** (Composer v6 algorithm sanity edge case) | User flipped `copilot.mode` from `each-iter` to `off` mid-PR. Cursor scores 5/5 this tick. But unresolved Copilot threads from before the flip still exist on the PR. | Step 9 `unresolved_not_ours.length == 0` precondition is FALSE (Copilot threads not in our pushbackReplies); SUCCESS_STOP blocked; loop continues to step 10 triage where it dispatches to whichever logins are currently in `github_reviewer_logins`. Copilot threads (no longer dispatched) eventually require manual resolution. **User action:** either re-enable copilot.mode=each-iter to let the loop drain them, or resolve manually. |
+| 21 | **Per-iter consensus achieved but leftover Copilot threads from earlier each-iter experiment** (Composer v6 algorithm sanity edge case) | User flipped `copilot.mode` from `each-iter` to `off` mid-PR. Cursor scores 5/5 this tick. But unresolved Copilot threads from before the flip still exist on the PR. | Step 9 `unresolved_not_ours.length == 0` precondition is FALSE (Copilot threads not in our threadPushbacks); SUCCESS_STOP blocked; loop continues to step 10 triage where it dispatches to whichever logins are currently in `github_reviewer_logins`. Copilot threads (no longer dispatched) eventually require manual resolution. **User action:** either re-enable copilot.mode=each-iter to let the loop drain them, or resolve manually. |
+| 22 | **Mode Y refusal handling** | SWE Agent posts "I cannot help with this" | ABORT cleanly; informative push notification; state file deleted |
+| 23 | **Mode Y ambiguous config ABORT** | `cursor.enabled=true` + `copilotSwe.mode=each-iter` + `primaryFixer=auto` | ABORT at pre-flight asking user to set primaryFixer explicitly |
+| 24 | **Mode Y PAUSE on behavior change** | PR hunk changes user-visible behavior (e.g. comparison operator on a cutoff) | PAUSE at Y.10; state file KEPT; user notified |
 
-22 test cases (1-19 + 20a + 20b + 21) across 20 numbered scenarios + 1 pre-flight step. 5 gating (1, 4, 8, 11, 17).
+25 test cases (1-19 + 20a + 20b + 21 + 22 + 23 + 24) across 23 numbered scenarios + 1 pre-flight step. 8 gating (1, 4, 8, 11, 17Y, 22, 23, 24).
 
 ---
 
@@ -121,7 +124,7 @@ gh pr view <PR#> --json reviews --jq '.reviews[].author.login' | sort -u
 - **PR used:** _____
 - **Outcome:** PASS / FAIL — _____ (notes)
 
-### Scenario 17 — Reviewer-mode alt: Copilot each-iter (no Cursor)
+### Scenario 17Y — Mode Y happy path: Copilot SWE Agent each-iter, no Cursor
 
 - **Date run:** 2026-05-23
 - **PR used:** MarcinSufa/exo-vault#128 (closed; fix-cycle test)
@@ -155,7 +158,7 @@ PR #128 walkthrough validated Mode Y end-to-end:
 5. Claude posted structured review comment on PR (visible at PR #128 comment 4526042632) with verdict
 6. User decides on the flagged item — Mode Y exits to PAUSE per design
 
-**v0.2 follow-up required:** rewrite SKILL.md to first-class both rotation modes. Today's spec only models Mode X.
+**v0.2 RESOLVED (this branch):** SKILL.md now first-classes both rotation modes — see docs/superpowers/specs/2026-05-23-pr-autopilot-v0.2-rotation-design.md.
 
 ### Scenario 21 (added during test) — Copilot Code Review trigger via wrong mechanism
 
@@ -167,10 +170,10 @@ PR #128 walkthrough validated Mode Y end-to-end:
 
 ## Sign-off
 
-When all 5 gating scenarios PASS, tag `v1.0.0`:
+When all 8 gating scenarios PASS, tag `v1.0.0`:
 
 ```bash
 cd "c:/Users/sufam/IdeaProjects/claude-pr-autopilot"
-git tag -a v1.0.0 -m "Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17) verified on real exo-vault PR"
+git tag -a v1.0.0 -m "Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) verified on real exo-vault PR"
 git push origin v1.0.0
 ```

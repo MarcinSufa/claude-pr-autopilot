@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "if": "Bash(gh pr create)",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/pr-autopilot-trigger.sh", "timeout": 15 }
+        ]
+      }
+    ]
+  }
+}

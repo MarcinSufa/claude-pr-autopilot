@@ -192,6 +192,8 @@ STATE_FILE="$HOME/.pr-autopilot/$(gh repo view --json owner --jq '.owner.login')
 if [ -f "$STATE_FILE" ]; then state = read $STATE_FILE; else state = createNew(prNumber); fi
 ```
 
+**Auto-trigger provenance:** When this step was reached because the auto-trigger hook nudged you (the invoking prompt is `/loop /pr-autopilot:step <N>` originating from the hook's `additionalContext`, not a manual user invocation), set on the new state: `"autoTriggered": true, "triggerSource": "posttooluse-hook"`. For manual invocations, set `"autoTriggered": false`. This is informational only (telemetry / debugging) and does not change loop behavior.
+
 **v1→v2 state migration (run immediately after load):** if a loaded state file predates the v2 schema, map the old `pushbackReplies` key onto `threadPushbacks` so Mode X does not lose pushback history. (Mode Y handles v1 state separately — it ABORTs; see Y.0.5.)
 
 ```

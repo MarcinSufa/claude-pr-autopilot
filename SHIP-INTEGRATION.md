@@ -1,4 +1,4 @@
-# /ship integration via Stop hook (Phase 2 — NOT IN v0.1.0 or v0.2)
+# /ship integration — auto-trigger (v0.3, shipped) + Stop-hook auto-chain (Phase 2, not yet)
 
 This file is a placeholder. The Phase 2 Stop hook auto-chain is documented in [`docs/DESIGN.md`](docs/DESIGN.md) but NOT IMPLEMENTED in v0.1.0 or v0.2 — it is targeted for v0.3+.
 
@@ -12,15 +12,15 @@ After running `/ship`, the user manually invokes:
 
 No Stop hook, no auto-chain.
 
-## v0.3+ planned behavior (Phase 2)
+## v0.3 behavior (auto-trigger — shipped)
 
-A Stop hook in `~/.claude/settings.json` will detect when `/ship` (or any Claude turn) ends with a `gh pr create` and auto-invoke `/loop /pr-autopilot:step <PR#>` with the just-created PR number.
-
-Per-session disable: `PR_AUTOPILOT_DISABLE=1` env var before running `/ship`.
-
-Hook mechanism (Stop vs PostToolUse) will be decided in the v0.3 spec; the v0.2 rotation work does not add any hook.
-
-Concrete hook JSON template will be added to this file when v0.3 ships. Until then: manual invocation only.
+A plugin-shipped `PostToolUse` hook (`if: "Bash(gh pr create)"`) runs a gate script that
+nudges Claude to auto-start the loop after a PR is created in an allowlisted repo. It does
+NOT scan Bash output (hooks can't see output) — Claude supplies the PR number from context.
+Gates: is-pr-create / draft-skip / allowlist / paused. Kill switch: `/pr-autopilot:pause`
+(touches `~/.pr-autopilot/paused`); re-enable with `/pr-autopilot:resume`. The paused
+sentinel is the sole kill switch — no env-var disable. Spec:
+`docs/superpowers/specs/2026-05-24-pr-autopilot-v0.3-auto-trigger-design.md`.
 
 ## Why deferred
 

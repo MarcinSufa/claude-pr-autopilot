@@ -65,7 +65,7 @@ gh pr view <PR#> --json reviews --jq '.reviews[].author.login' | sort -u
 | 11 | **Score 5/5 but 1 unresolved thread** (Phase 1 gate, Composer-added) | Cursor scores 5/5, leaves a comment we haven't touched | CONTINUE one more iteration to address; never false-positive SUCCESS |
 | 12 | CI pending on last push | After our push, required checks still queued/running | CONTINUE (wait), not ABORT |
 | 13 | `/loop` STOP propagation | On SUCCESS, skill omits ScheduleWakeup | `/loop` terminates; no further ticks |
-| 14 | `PR_AUTOPILOT_DISABLE=1` (Phase 2) | Set env var before `/ship` | Stop hook reads env, no-ops; user can still manually invoke |
+| 14 | **Kill switch: paused sentinel** | `/pr-autopilot:pause` (touch `~/.pr-autopilot/paused`) then create a PR in an allowed repo | Gate 3 fires; hook emits no nudge; no loop starts. `/pr-autopilot:resume` restores. |
 | 15 | 50+ review threads | Open PR with massive review load | PAUSE "likely truncation"; user resumes manually after manual cleanup |
 | 16 | **No-progress stall** (Composer v2 #1) | Cursor has reviewed, score is 3/5, no new comments for multiple ticks, all open threads are already-pushed-back-on (so triage does nothing) | After 6 ticks (~9 min) with `lastSeenReviewId` unchanged AND zero edits/pushbacks → PAUSE "loop spinning ≥6 ticks with no new review and no actions taken; manual intervention needed" |
 | 17Y | **Mode Y happy path: Copilot SWE Agent each-iter, no Cursor** (Phase 1 gate for Mode Y) | Config: `copilotSwe.mode=each-iter`, others off, `primaryFixer=auto`. Open PR with neutral description + real smells. | `derive_mode` → Mode Y. Y.5 posts `@copilot please review` once (no spam); SWE Agent pushes fix commits; Y.8 Claude reviews each hunk against `PUSHBACK.md`; all APPROVE → SUCCESS_STOP. Validates the Mode Y rotation end-to-end (matches PR #128 walkthrough). |
@@ -77,8 +77,14 @@ gh pr view <PR#> --json reviews --jq '.reviews[].author.login' | sort -u
 | 22 | **Mode Y refusal handling** | SWE Agent posts "I cannot help with this" | ABORT cleanly; informative push notification; state file deleted |
 | 23 | **Mode Y ambiguous config ABORT** | `cursor.enabled=true` + `copilotSwe.mode=each-iter` + `primaryFixer=auto` | ABORT at pre-flight asking user to set primaryFixer explicitly |
 | 24 | **Mode Y PAUSE on behavior change** | PR hunk changes user-visible behavior (e.g. comparison operator on a cutoff) | PAUSE at Y.10; state file KEPT; user notified |
+| 25 | **Auto-trigger: allowlist reject** | `gh pr create` in a repo NOT in allowed-repos | Gate 2 fails; hook silent; no nudge, no loop |
+| 26 | **Auto-trigger: draft skip** | `gh pr create --draft` (and `-d`) in an allowed repo | Gate 1 fires; no nudge |
+| 27 | **Auto-trigger: paused** | `paused` sentinel present, allowed non-draft PR | Gate 3 fires; no nudge |
+| 28 | **Auto-trigger: happy auto-chain** (live dogfood) | allowed repo, non-draft, not paused; run `/ship` | hook nudges → Claude resolves PR# → ScheduleWakeup starts the loop → loop runs to its normal terminal state |
+| 29 | **Auto-trigger: duplicate guard** | PR already has a `~/.pr-autopilot/<owner>-<repo>-<N>.json` state file | nudge's idempotency clause → Claude does NOT start a second loop |
+| 30 | **Auto-trigger: nudge ignored (fail-safe)** | hook nudges but Claude finishes /ship without acting | no error, no state corruption; manual `/pr-autopilot:step <N>` still works |
 
-25 test cases (1-19 + 20a + 20b + 21 + 22 + 23 + 24) across 23 numbered scenarios + 1 pre-flight step. 8 gating (1, 4, 8, 11, 17Y, 22, 23, 24).
+31 test cases (1-19 + 20a + 20b + 21 + 22-30, with 17 renamed 17Y) + 1 pre-flight step. 8 gating (1, 4, 8, 11, 17Y, 22, 23, 24); auto-trigger scenarios 25-30 added in v0.3.
 
 ---
 
@@ -281,3 +287,22 @@ Traced the literal `prAutopilotStepModeY` pseudocode (Y.0–Y.11) against the re
 **Outcome:** PASS — the codified algorithm, executed step-by-step against real recorded data, reproduces the empirically-observed PR #128 outcome exactly (review approves 7, PAUSEs on the eligibility-cutoff behavior change). The behavior-change PAUSE rule added in this branch formalizes the exact judgment Claude made by hand in the original run.
 
 **Honest caveat — what this is NOT:** this is a desk-execution against a recorded fixture, not a fresh live Mode Y run. A brand-new live Mode Y PR (SWE Agent responding in real time across multiple iterations) remains the **v1.0.0 gate** (scenarios 17Y / 24 on a live exo-vault PR). v0.2.0 ships as a feature release; v1.0.0 is the stability claim that requires the live run.
+
+## v0.3 verification (W1–W7)
+
+Date: 2026-05-24
+Branch: feature/v0.3-auto-trigger
+
+| Check | What | Result |
+|---|---|---|
+| W1 | gate script: draft (`--draft`/`-d`) → no nudge | PASS (test-trigger.sh) |
+| W2 | gate script: non-allowlisted repo → no nudge | PASS |
+| W3 | gate script: paused sentinel → no nudge | PASS |
+| W4 | gate script: all gates pass → valid JSON nudge | PASS |
+| W5 | gate script: malformed stdin → exit 0, empty stdout | PASS |
+| W6 | hooks.json valid JSON + `if:Bash(gh pr create)` + correct command path | PASS |
+| W7 | plugin-path command resolves on real `--plugin-dir` install | DEFERRED — verify at install (Task 10 live dogfood) |
+
+`bash hooks/tests/test-trigger.sh` → **pass=11 fail=0** (W1–W5 + Gate 0 + 3 edge-case regressions: trailing-slash URL, no-origin-remote, trailing-whitespace allowlist line). Full-repo markdownlint clean. plugin.json = 0.3.0.
+
+**Auto-trigger EVAL scenarios 25–30** are spec'd above; 25/26/27/29 are covered by the gate-script unit tests; 28 (live happy auto-chain) + 30 (nudge-ignored) require the live dogfood (Task 10).

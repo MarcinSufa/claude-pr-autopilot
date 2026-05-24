@@ -69,7 +69,7 @@ When pushing back on a comment, post a reply on the thread (line-level: `gh api 
 - <link to relevant CLAUDE.md rule or test, if applicable>
 ```
 
-After posting, resolve the thread via GraphQL `resolveReviewThread` mutation. The thread will not be re-fetched in subsequent iterations because of the `isResolved=true` filter, but ALSO record the threadId in `state.pushbackReplies` so it survives any future un-resolve.
+After posting, resolve the thread via GraphQL `resolveReviewThread` mutation. The thread will not be re-fetched in subsequent iterations because of the `isResolved=true` filter, but ALSO record the threadId in `state.threadPushbacks` so it survives any future un-resolve.
 
 ## Tier 2 reply template (when reviewer re-flags after our Tier 1) **(Mode X only — review threads)**
 

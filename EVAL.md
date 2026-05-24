@@ -287,3 +287,22 @@ Traced the literal `prAutopilotStepModeY` pseudocode (Y.0–Y.11) against the re
 **Outcome:** PASS — the codified algorithm, executed step-by-step against real recorded data, reproduces the empirically-observed PR #128 outcome exactly (review approves 7, PAUSEs on the eligibility-cutoff behavior change). The behavior-change PAUSE rule added in this branch formalizes the exact judgment Claude made by hand in the original run.
 
 **Honest caveat — what this is NOT:** this is a desk-execution against a recorded fixture, not a fresh live Mode Y run. A brand-new live Mode Y PR (SWE Agent responding in real time across multiple iterations) remains the **v1.0.0 gate** (scenarios 17Y / 24 on a live exo-vault PR). v0.2.0 ships as a feature release; v1.0.0 is the stability claim that requires the live run.
+
+## v0.3 verification (W1–W7)
+
+Date: 2026-05-24
+Branch: feature/v0.3-auto-trigger
+
+| Check | What | Result |
+|---|---|---|
+| W1 | gate script: draft (`--draft`/`-d`) → no nudge | PASS (test-trigger.sh) |
+| W2 | gate script: non-allowlisted repo → no nudge | PASS |
+| W3 | gate script: paused sentinel → no nudge | PASS |
+| W4 | gate script: all gates pass → valid JSON nudge | PASS |
+| W5 | gate script: malformed stdin → exit 0, empty stdout | PASS |
+| W6 | hooks.json valid JSON + `if:Bash(gh pr create)` + correct command path | PASS |
+| W7 | plugin-path command resolves on real `--plugin-dir` install | DEFERRED — verify at install (Task 10 live dogfood) |
+
+`bash hooks/tests/test-trigger.sh` → **pass=11 fail=0** (W1–W5 + Gate 0 + 3 edge-case regressions: trailing-slash URL, no-origin-remote, trailing-whitespace allowlist line). Full-repo markdownlint clean. plugin.json = 0.3.0.
+
+**Auto-trigger EVAL scenarios 25–30** are spec'd above; 25/26/27/29 are covered by the gate-script unit tests; 28 (live happy auto-chain) + 30 (nudge-ignored) require the live dogfood (Task 10).

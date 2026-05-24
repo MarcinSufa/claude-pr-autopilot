@@ -196,19 +196,50 @@ State schema:
 
 ```json
 {
+  "stateSchemaVersion": 2,
   "prNumber": 0,
   "repo": "<owner>/<name>",
   "headRef": "<branch>",
+  "resolvedMode": "X" | "Y",
+  "createdAt": "<iso>",
+  "updatedAt": "<iso>",
+
   "fixIterations": 0,
   "pollTicksWithoutReview": 0,
+  "pollTicksWithoutActivity": 0,
   "ticksWithoutProgress": 0,
   "lastHandledHeadOid": "<sha>",
   "lastSeenReviewId": "<gh-review-id>",
-  "pushbackReplies": [{"threadId": "<id>", "iteration": 0, "reason": "..."}],
-  "createdAt": "<iso>",
-  "updatedAt": "<iso>"
+  "lastTriggerAt": "<iso>",
+
+  "threadPushbacks": [
+    {"threadId": "<id>", "iteration": 0, "reason": "..."}
+  ],
+
+  "commitPushbacks": [
+    {
+      "iteration": 1,
+      "atOid": "<sha>",
+      "pushbacks": [{"file": "...", "range": "...", "reason": "..."}]
+    }
+  ],
+
+  "handledOids": ["<sha>", "..."],
+  "handledCommentIds": [123456],
+  "reviewIteration": 0
 }
 ```
+
+**Key changes from v0.1 state:**
+
+- `stateSchemaVersion: 2` — bumped from implicit v1 (no field). Migration: state files without `stateSchemaVersion` are treated as v1 (Mode X) and require fresh start if user switches to Mode Y.
+- `resolvedMode` — persisted on first tick; mode-drift guard (Y.0.5) aborts if config-derived mode differs from stored mode.
+- `pushbackReplies` (v0.1) → **split into** `threadPushbacks` (Mode X, was Mode X-only in practice anyway) and `commitPushbacks` (Mode Y new).
+- `handledOids`, `handledCommentIds`, `lastTriggerAt`, `pollTicksWithoutActivity`, `reviewIteration` — all Mode Y additions.
+
+**Backwards-compat:** Mode X reads/writes `threadPushbacks` (renamed from `pushbackReplies`); the migration writes both keys for one release if v1 state is detected, then `pushbackReplies` is dropped in v0.3.
+
+**Migration decision:** v1 state files (no `stateSchemaVersion` field) are treated as Mode X; if the current derived mode is Y, ABORT with a message telling the user to delete the stale state file to start fresh in Mode Y.
 
 ### 1. Fetch PR state
 

@@ -193,6 +193,8 @@ Branch: feature/v0.2-rotation
 | V4 | pre-flight accepts Mode Y | PASS |
 | V5 | PUSHBACK Mode Y coverage | PASS |
 | V6 | SKILL.md contradictions gone | PASS |
+| V7 | markdownlint (CI-equivalent) clean | PASS |
+| V8 | cross-file stale-ref sweep clean | PASS |
 
 ### V1 — derive_mode truth table
 
@@ -233,3 +235,49 @@ grep count = 17. Every rule heading carries either `(Mode X & Y)`, `(Mode X only
 ### V6 — SKILL.md contradictions
 
 `grep -nE "Cannot do line-level fixes|please review this PR — primary reviewers scored"` returned no output. No legacy contradiction text present.
+
+### V7 — markdownlint (CI-equivalent)
+
+Ran the exact CI command locally: `markdownlint-cli@0.41.0 '**/*.md' --ignore node_modules --disable MD013 MD022 MD024 MD031 MD032 MD033 MD034 MD038 MD040 MD041 MD056` → exit 0, no findings. (Added to the matrix after a bare-pseudocode block was initially parsed as H1 headings and failed CI on first push — lint is now a documented pre-merge gate, not an ad-hoc check.)
+
+### V8 — cross-file stale-reference sweep
+
+`grep -rnE "pushbackReplies|appendPushbackReplies|Cannot do line-level fixes|\(1, 4, 8, 11, 17\)"` across all runtime/doc files (skills/, reviewers/, README, EVAL, ROADMAP, SHIP-INTEGRATION, PUSHBACK, REVIEW-TRIAGE-COPY) → only intentional matches remain: the rename-explanation prose, the v1→v2 migration step (which deliberately maps `pushbackReplies`→`threadPushbacks`), and a V6 verification note quoting the confirming grep. No live stale references. (Added after external review found 5/6 of its comments were cross-file consistency gaps the internal grep checks missed.)
+
+---
+
+## v0.2 algorithm execution validation (added to reach merge-as-stable confidence)
+
+The pre-merge matrix (V1–V8) proves internal consistency. These two records prove the algorithms produce the right outcome **when executed** — closing the "correct on paper, untested as written" gap.
+
+### Mode X — LIVE real-PR execution (claude-pr-autopilot PR #1, 2026-05-24)
+
+The v0.2 PR was itself run through the Mode X loop end-to-end:
+
+1. Claude (fixer) pushed `e856e36` addressing review feedback.
+2. Copilot Code Review (reviewer) posted 6 line-level comments.
+3. Claude triaged all 6 against `PUSHBACK.md` → all APPLY (no push-back, no PAUSE) → fixed + pushed.
+4. Re-review requested. **Re-trigger gotcha surfaced:** `requested_reviewers` re-add did not re-fire Code Review; an `@copilot` mention was needed (which summons the SWE Agent — a different product). Captured for v0.3.
+5. Copilot re-review returned clean: "no additional changes are needed" → **SUCCESS_STOP.**
+
+**Outcome:** PASS — Mode X fixer→reviewer→converge cycle validated live. Exercised triage-against-rubric, fix-and-push, and reviewer-approval termination. The only friction was the re-trigger mechanism (now a known v0.3 item, not a Mode X logic defect).
+
+### Mode Y — algorithm executed as written against PR #128 recorded transcript
+
+Traced the literal `prAutopilotStepModeY` pseudocode (Y.0–Y.11) against the recorded PR #128 events (SWE Agent commit `cbbddd20`: 7 fixes + 6-test file, including `age > 18` → `age >= 18`):
+
+| Step | Input from PR #128 | Pseudocode result |
+|---|---|---|
+| Y.0 / pre-flight | `copilotSwe.mode=each-iter`, others off | `derive_mode` → "Y"; pre-flight passes |
+| Y.0.5 | fresh v2 state | `resolvedMode` set to "Y"; no v1-state ABORT |
+| Y.1–Y.3 | PR open, feature branch | lifecycle + branch guards pass |
+| Y.4 / Y.4.5 | 0 pushbacks, CI not red | under cap; proceed |
+| Y.5 | first tick | posts `@copilot` once, sets `lastTriggerAt`; next tick skips re-trigger (anti-spam holds) |
+| Y.6 / Y.7 | SWE pushed `cbbddd20` | `new_commits` non-empty → `goto Y_8_review_commits` |
+| Y.8 | 8 hunks | 7 → APPROVE; 1 (`age > 18`→`age >= 18`) → **PAUSE** via "behavior change without intent signal" rule |
+| Y.9 | — | posts structured per-hunk verdict comment (real run: PR #128 comment 4526042632) |
+| Y.10 | 1 PAUSE verdict | PAUSE branch → notify, KEEP state, terminate |
+
+**Outcome:** PASS — the codified algorithm, executed step-by-step against real recorded data, reproduces the empirically-observed PR #128 outcome exactly (review approves 7, PAUSEs on the eligibility-cutoff behavior change). The behavior-change PAUSE rule added in this branch formalizes the exact judgment Claude made by hand in the original run.
+
+**Honest caveat — what this is NOT:** this is a desk-execution against a recorded fixture, not a fresh live Mode Y run. A brand-new live Mode Y PR (SWE Agent responding in real time across multiple iterations) remains the **v1.0.0 gate** (scenarios 17Y / 24 on a live exo-vault PR). v0.2.0 ships as a feature release; v1.0.0 is the stability claim that requires the live run.

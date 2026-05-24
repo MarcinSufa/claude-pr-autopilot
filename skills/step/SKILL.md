@@ -392,7 +392,7 @@ else:
 ### 9. Success path (multi-reviewer aggregate)
 
 ```
-pushback_thread_ids = state.pushbackReplies | jq 'map(.threadId)'
+pushback_thread_ids = state.threadPushbacks | jq 'map(.threadId)'
 unresolved_not_ours = threads | filter where (.id NOT IN pushback_thread_ids)
 
 # Per-reviewer isSuccess (defined per-adapter):

@@ -2,25 +2,30 @@
 
 Snapshot date: 2026-05-23. Revisit after each release to re-prioritise.
 
-## v0.1.0 (pre-release, current)
+## v0.1.0 (pre-release)
 
 Manual `/loop /pr-autopilot:step <PR#>` after `/ship`. Default config: Cursor primary + Copilot final-only.
 
 Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17) **must pass on a real exo-vault PR before bumping to v1.0.0**.
 
+## v0.2 — Two-mode rotation (current)
+
+First-class Mode X (Claude fixes, agent reviews) AND Mode Y (Copilot SWE Agent
+fixes, Claude reviews against PUSHBACK.md). Mode-aware pre-flight, primaryFixer
+config. Spec: docs/superpowers/specs/2026-05-23-pr-autopilot-v0.2-rotation-design.md.
+
+## v0.3 — Auto-trigger
+PostToolUse hook on `gh pr create` + install/allow slash commands + Mode Y final-pass.
+
+## v0.4 — Safe auto-merge to dev
+`gh pr merge --auto` to dev only (never master), guarded by neverMergeToBranches.
+
+## v0.5 / Future — Cursor-native runtime adapter (Path C)
+Port the loop layer to Cursor primitives. Algorithm unchanged; only the loop driver moves.
+
 ## v1.0.0 (gated by Phase 1 EVAL)
 
 Same scope as v0.1.0 but with all five Phase 1 gating scenarios verified on a real PR. Stable manual API.
-
-## v1.1.0+ — Phase 2: Stop hook auto-chain
-
-Add Stop hook in `~/.claude/settings.json` that detects when `/ship` (or any Claude turn) ends with a `gh pr create` and auto-invokes `/loop /pr-autopilot:step <PR#>`. Per-session disable via `PR_AUTOPILOT_DISABLE=1`.
-
-Requires the manual loop (v1.0.0) to have proven stable on at least 10 real PRs first.
-
-## v0.2 — Cursor-native runtime adapter (Path C from spec)
-
-The user's daily-driver IDE is Cursor, but v0.1.0 ships as a Claude Code plugin (uses `/loop` dynamic mode + `ScheduleWakeup`). Port the loop layer to Cursor's primitives (`AGENT_LOOP_TICK_*` sentinels, `.cursor/hooks.json`, Background Agent triggers) so the skill runs natively where the user works. Algorithm doesn't change — only the loop driver and config locations.
 
 ## Future (no version target)
 
@@ -39,7 +44,7 @@ Ranked by leverage:
 
 ## Anti-roadmap (explicit "not doing this")
 
-- **Automatic merge after 5/5** — user always eyeballs and clicks merge. Safety > speed.
+- **Automatic merge to master/production after 5/5** — user always eyeballs the final merge to master. Auto-merge to dev (v0.4) is guarded by `neverMergeToBranches`; production merges stay manual. Safety > speed.
 - **Reviewer-less mode** — pre-flight config validator ABORTs if no per-iter reviewer enabled. Nothing would drive the loop.
 - **Claude-self as primary loop reviewer** — Claude grading Claude converges in one step. Final-pass only by design.
 

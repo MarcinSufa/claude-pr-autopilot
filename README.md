@@ -40,6 +40,17 @@ After creating a PR (via `/ship` or `gh pr create`):
 
 The loop runs unattended until success or a safety guard fires. See [`SKILL.md`](SKILL.md) for the full algorithm and [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture spec (8 review rounds; CLEARED by Composer 2.5).
 
+### Two rotation modes
+
+- **Mode X** — an external reviewer (Cursor / Copilot Code Review / Codex) reviews;
+  Claude applies the fixes. Use when you want human-style review of Claude's work.
+- **Mode Y** — Copilot SWE Agent applies the fixes and pushes commits; Claude reviews
+  those commits against PUSHBACK.md and approves or flags behavior changes. Use when
+  you have Copilot SWE Agent and want it to do the fixing.
+
+Set `prAutopilot.primaryFixer` to `auto` (default), `claude` (force X), or
+`copilotSwe` (force Y).
+
 ## Status
 
 **v0.1.0 — pre-release.** Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17) not yet verified on real PR. Will bump to **v1.0.0** after all five gates pass. Phase 2 (Stop hook auto-chain from `/ship`) deferred until then.

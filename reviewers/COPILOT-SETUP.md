@@ -21,10 +21,20 @@ That's it. No agent rules needed — Copilot Code Review is built into GitHub.
 
 ### 2. Verify the trigger mechanism
 
-Copilot reviews on demand when `@copilot please review` appears as a PR comment OR (per repo setting) automatically on PR open. The `pr-autopilot` skill triggers Copilot by posting that comment:
+Copilot **Code Review** is triggered by the requested-reviewers API, NOT by an
+`@copilot` mention:
 
-- **`final-only` mode**: skill posts the comment once, after all per-iter reviewers report success
-- **`each-iter` mode**: skill posts the comment after every push
+```bash
+gh api repos/{owner}/{repo}/pulls/<PR#>/requested_reviewers -X POST -f 'reviewers[]=Copilot'
+```
+
+⚠ The `@copilot please review` mention triggers the **SWE Agent** (a different
+product — reviewer + fixer). See `skills/step/SKILL.md` "Copilot has TWO products".
+
+The `pr-autopilot` skill triggers Copilot Code Review via the requested-reviewers API:
+
+- **`final-only` mode**: skill adds Copilot as a reviewer once, after all per-iter reviewers report success
+- **`each-iter` mode**: skill re-requests Copilot review after every push
 
 ### 3. Verify the bot login
 

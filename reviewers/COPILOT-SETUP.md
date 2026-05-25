@@ -68,7 +68,35 @@ Cost: ~5 Copilot premium requests per PR (one per iter). Copilot Pro+ has ~1500 
 
 ## STOP signal
 
-Copilot has no native 1-5 score. The skill uses **"zero unresolved review threads authored by `copilot-pull-request-reviewer[bot]`"** as the success signal. If Copilot leaves open threads, the loop continues; if the threads we resolved come back, the stall guard (step 11.5) catches the ping-pong.
+Copilot Code Review has no native 1-5 score. The skill uses **"zero unresolved review threads authored by `copilot-pull-request-reviewer[bot]`"** as the success signal. If Copilot leaves open threads, the loop continues; if the threads we resolved come back, the stall guard (step 11.5) catches the ping-pong.
+
+## No Cursor Pro? Use the SWE Agent as a 1-5 scoring reviewer (`copilotSwe.mode=review-score`)
+
+If you have a Copilot seat but **not** Cursor Pro, and you want a Cursor-style `Score: 5/5` gate, use the **SWE Agent** (not Code Review) as a *review-only scoring reviewer*:
+
+```jsonc
+// ~/.claude/settings.json
+"prAutopilot": {
+  "primaryFixer": "claude",            // Claude applies the fixes
+  "reviewers": {
+    "cursor":     { "enabled": false },
+    "copilotSwe": { "mode": "review-score", "login": "copilot-swe-agent",
+                    "scoreRegex": "(?i)readiness:\\s*([1-5])" }
+  }
+}
+```
+
+How it differs from the other `copilotSwe` modes:
+
+| `copilotSwe.mode` | Role | Trigger | Success signal | Who fixes |
+|---|---|---|---|---|
+| `each-iter` | **fixer** (Mode Y) | `@copilot please review` | Claude judges Copilot's commits | Copilot (pushes commits) |
+| `review-score` | **reviewer** (Mode X) | `@copilot please review` **(review-only)** + "end with `Readiness: X/5`" | `scoreRegex` match `== 5` | **Claude** |
+| `final-only` | one-shot sanity check | same mention, at end | Claude judges the comment body | n/a |
+
+Each iteration the skill posts a review-only mention asking Copilot to end with `Readiness: X/5`; it parses that line with `scoreRegex` and loops until `5/5` (Claude fixing the issues Copilot lists in between). This works out-of-box on any repo with Copilot installed — no Code Review repo setup required.
+
+Cost: one SWE-Agent premium request per iteration (same quota note as each-iter mode below).
 
 ## ⚠ Each-iter mode rate-limit risk
 

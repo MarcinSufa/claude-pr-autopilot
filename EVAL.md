@@ -180,6 +180,17 @@ PR #128 walkthrough validated Mode Y end-to-end:
 - **Setup:** PR #127, attempted to trigger Copilot Code Review via `@copilot please review` comment
 - **Outcome:** TRIGGER WRONG — `@copilot` mention fires SWE Agent, not Code Review. `requested_reviewers` API is the correct trigger. **Patched in commit c682890** (added `copilotSwe` adapter + clarified `copilot` adapter trigger doc).
 
+### Scenario 25 — `copilotSwe.mode=review-score`: SWE Agent as a 1-5 scoring reviewer (no Cursor Pro)
+
+- **Date run:** 2026-05-25
+- **PR used:** sysdynetechnologies/concretego-web#2746 (CON-8283 — hand-driven, pre-implementation of this mode)
+- **Setup:** No Cursor Pro. `@copilot` mention requesting **review-only** + "end with `Readiness: X/5`"; Claude applies fixes; loop re-triggers `@copilot` after each push.
+- **Walkthrough:**
+  1. Round 1: `@copilot` posted a conversational review ending `Readiness: 4/5`, flagging missing tests for the PR's core invariant (not blocking).
+  2. Claude added the 3 invariant tests, pushed, re-posted the review-only mention.
+  3. Round 2: `@copilot` re-reviewed → `Readiness: 5/5`, no remaining gaps → would SUCCESS_STOP.
+- **Outcome:** VALIDATED BY HAND — confirms the mode's flow end-to-end (trigger → parse `Readiness: N/5` → gate on `==5` → Claude fixes between rounds). Motivated adding `copilotSwe.mode=review-score` to the skill (this change). **Not yet run through the automated `/loop /pr-autopilot:step` driver** — that is the remaining gate for this scenario.
+
 ---
 
 ## Sign-off
@@ -212,7 +223,9 @@ Branch: feature/v0.2-rotation
 
 ### V1 — derive_mode truth table
 
-Variables: `swe_each` = copilotSwe.mode=="each-iter"; `any_xreviewer` = cursor.enabled OR copilot.mode=="each-iter" OR codex.mode=="each-iter"
+Variables: `swe_each` = copilotSwe.mode=="each-iter"; `any_xreviewer` = cursor.enabled OR copilot.mode=="each-iter" OR codex.mode=="each-iter" OR copilotSwe.mode=="review-score"
+
+Note: `copilotSwe.mode=="review-score"` joins `any_xreviewer` (it makes SWE Agent a per-iter *reviewer*, with Claude as fixer). It is NOT `swe_each`, so it never triggers Mode Y and never conflicts with `primaryFixer="claude"`. Thus `claude`+review-score → X, `auto`+review-score (no swe_each) → X — behaving exactly like the `(a) cursor only` column.
 
 Reviewer combos: (a) cursor only — `any_xreviewer=true, swe_each=false`; (b) copilotSwe only — `swe_each=true, any_xreviewer=false`; (c) both cursor+swe — `any_xreviewer=true, swe_each=true`; (d) nothing — both false.
 

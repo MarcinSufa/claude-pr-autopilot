@@ -30,7 +30,7 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
     "reviewers": {
       "cursor":     { "enabled": true,  "login": "cursor[bot]", "scoreRegex": "(?i)score:\\s*([1-5])" },
       "copilot":    { "mode": "final-only", "login": "copilot-pull-request-reviewer[bot]" },
-      "copilotSwe": { "mode": "off", "login": "copilot-swe-agent" },
+      "copilotSwe": { "mode": "off", "login": "copilot-swe-agent", "scoreRegex": "(?i)readiness:\\s*([1-5])" },
       "codex":      { "mode": "off", "postCommentsToPR": false },
       "claudeSelf": { "enabled": false, "rubricFile": "SELF-REVIEW-RUBRIC.md" }
     },
@@ -65,6 +65,7 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 | `copilot.mode=each-iter` | yes | no | yes (`requested_reviewers` API with `Copilot` — NOT `@copilot` mention which triggers SWE Agent) | yes | "0 unresolved threads" |
 | `copilot.mode=final-only` | no | yes | yes (same API, one-shot at end) | yes | "0 unresolved threads" |
 | `copilotSwe.mode=each-iter` | yes | no | yes (`gh pr comment "@copilot please review"`) | no — top-level conversational comments | Claude judgment on comment body |
+| `copilotSwe.mode=review-score` | yes | no | yes (`@copilot please review` mention, **review-only**) | no — top-level conversational comment | `Readiness: N/5` regex (`scoreRegex`) |
 | `copilotSwe.mode=final-only` | no | yes | yes (same mention, one-shot at end) | no | Claude judgment on comment body |
 | `codex.mode=each-iter` | yes | no | yes (`codex review --diff`) | no | pass/fail |
 | `codex.mode=final-only` | no | yes | yes (one-shot at end) | no | pass/fail |
@@ -74,6 +75,10 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 - **Code Review** posts structured line-level threads. Triggered by adding `Copilot` via the requested-reviewers API (the `@copilot` mention does NOT trigger this). May require specific repo setup (rulesets or manual reviewer add) and a paid Copilot tier with Code Review enabled.
 - **SWE Agent** posts conversational top-level comments. Triggered by `@copilot please review` mention. Works out-of-box on most repos with Copilot installed. Applies line-level fixes by pushing commits (verified on exo-vault PR #128 — 7 fixes + a test file). Posts a conversational top-level comment alongside the commits.
 Per real-world testing (2026-05-23), SWE Agent fires more reliably on private repos. Code Review may need additional setup most users don't have. Default to `copilotSwe` if Code Review doesn't respond within 10 poll-ticks.
+
+**SWE Agent serves two distinct roles, selected by `copilotSwe.mode`:**
+- **`each-iter` — fixer (Mode Y).** The mention asks Copilot to review *and fix*; it pushes commits, Claude reviews them. Copilot drives the change.
+- **`review-score` — scoring reviewer (Mode X).** The mention asks Copilot to **review only (no code changes)** and end with `Readiness: X/5`; the loop parses that score with `copilotSwe.scoreRegex` and gates on `== 5`, exactly like `cursor`. **Claude is the fixer.** Use this when you have a Copilot seat but no Cursor Pro and want a Cursor-style 1–5 gate. (`final-only` is a one-shot conversational sanity check, judged by Claude.)
 
 ## Mode derivation
 
@@ -90,17 +95,18 @@ Per real-world testing (2026-05-23), SWE Agent fires more reliably on private re
 **`auto` resolution rules** (first match wins):
 
 1. If `copilotSwe.mode == "each-iter"` AND `cursor.enabled == false` AND `copilot.mode != "each-iter"` AND `codex.mode != "each-iter"` → **Mode Y**
-2. Else if any of {`cursor.enabled`, `copilot.mode == "each-iter"`, `codex.mode == "each-iter"`} AND `copilotSwe.mode != "each-iter"` → **Mode X**
+2. Else if any of {`cursor.enabled`, `copilot.mode == "each-iter"`, `codex.mode == "each-iter"`, `copilotSwe.mode == "review-score"`} AND `copilotSwe.mode != "each-iter"` → **Mode X** (`review-score` makes SWE Agent a per-iter *reviewer*; Claude fixes)
 3. Else if BOTH a per-iter reviewer AND `copilotSwe.mode == "each-iter"` are enabled → **ABORT** with message: "ambiguous fixer config. Set `primaryFixer` to 'claude' or 'copilotSwe' explicitly to resolve."
 4. Else (no per-iter anything) → **ABORT** with message: "no per-iter reviewer or fixer enabled; nothing would drive the loop"
 
 ```python
 function derive_mode(config):
   pf = config.primaryFixer  # default "auto"
-  swe_each = config.reviewers.copilotSwe.mode == "each-iter"
+  swe_each = config.reviewers.copilotSwe.mode == "each-iter"  # Mode Y fixer ONLY
   any_xreviewer = config.reviewers.cursor.enabled
                   or config.reviewers.copilot.mode == "each-iter"
                   or config.reviewers.codex.mode == "each-iter"
+                  or config.reviewers.copilotSwe.mode == "review-score"  # SWE Agent as scoring reviewer (Mode X)
 
   if pf == "claude":
     if swe_each: return ABORT_CONFIG  # conflict — see message in pre-flight
@@ -145,10 +151,11 @@ if mode == "X":
   if not any(getattr(r, "enabledForEachIter", False)
              for r in [config.reviewers.cursor,
                        config.reviewers.copilot,
-                       config.reviewers.codex]):
+                       config.reviewers.codex,
+                       config.reviewers.copilotSwe]):  # copilotSwe counts only in review-score mode
     push_notification(
       "config error",
-      "Mode X requires at least one per-iter reviewer in {cursor, copilot, codex}"
+      "Mode X requires at least one per-iter reviewer in {cursor, copilot, codex, copilotSwe(review-score)}"
     )
     return  # terminate
 
@@ -373,7 +380,10 @@ for r in per_iter_reviewers:
           | jq --arg sha "${state.lastHandledHeadOid}" \
               'last(.comments[] | select(.author.login == "copilot-swe-agent"))'
         if no recent SWE comment OR last comment predates our push:
-          gh pr comment ${prNumber} --body "@copilot please review"
+          # review-score mode: review ONLY (Claude fixes) + emit a parseable 1-5 score.
+          # (In Mode X, copilotSwe in per_iter_reviewers always means review-score —
+          #  each-iter is the Mode Y fixer, handled in its own flow.)
+          gh pr comment ${prNumber} --body $'@copilot please review this PR. Review ONLY — do NOT push code changes.\n\nList any blocking issues, then end with a line in EXACTLY this format:\n\nReadiness: X/5\n\nwhere 1 = not mergeable and 5 = ready to merge.'
       "codex":
         codex review --diff origin/${pr.baseRefName}..HEAD --format json > /tmp/codex_review_${prNumber}.json
 ```
@@ -396,7 +406,10 @@ for r in per_iter_reviewers:
             '[.comments[] | select(.author.login == $login)]'
       outcomes["copilotSwe"].hasReviewed = (swe_comments.length > 0 AND timestamp of latest comment >= our headOid push time)
       outcomes["copilotSwe"].latestCommentBody = last(swe_comments).body
-      # isSuccess determined by Claude reading the comment body — see step 9
+      if config.reviewers.copilotSwe.mode == "review-score":
+        # Parse the structured verdict, same as cursor — gate on score, not LLM judgment.
+        outcomes["copilotSwe"].score = regex match config.reviewers.copilotSwe.scoreRegex against latestCommentBody
+      # else (each-iter/final-only): isSuccess determined by Claude reading the comment body — see step 9
     "codex":
       outcomes["codex"].result = parse pass/fail from /tmp/codex_review_${prNumber}.json
 
@@ -459,7 +472,10 @@ unresolved_not_ours = threads | filter where (.id NOT IN pushback_thread_ids)
 # Per-reviewer isSuccess (defined per-adapter):
 # - cursor:     outcomes.cursor.score == "5"
 # - copilot:    count of unresolved threads where author == copilot.login == 0
-# - copilotSwe: Claude reads outcomes.copilotSwe.latestCommentBody and judges whether it expresses approval
+# - copilotSwe (review-score): outcomes.copilotSwe.score == "5". Review-only; Claude is the fixer.
+#                If score < 5 (or score missing — re-trigger next tick), treat the issues listed
+#                in the comment body as pseudo-threads for triage in step 10, same as below.
+# - copilotSwe (each-iter/final-only): Claude reads outcomes.copilotSwe.latestCommentBody and judges whether it expresses approval
 #                ("no blockers", "looks good", "ready to merge", "approved", "no issues found", etc.)
 #                vs lists issues to address. NO score; pure LLM judgment of natural language.
 #                If body lists actionable issues, treat each as a pseudo-thread for triage in step 10.
@@ -1018,7 +1034,7 @@ Gates 1 (default-off) + 3 (production guard) are the safety floor. `lineMatchCas
 | Not in a git repo | pre-flight 0.2 | ABORT |
 | `gh` not authenticated | pre-flight 0.3 | ABORT |
 | PR not found in current repo | pre-flight 0.4 | ABORT |
-| Config: no driver at all — no per-iter reviewer in {cursor,copilot,codex} AND copilotSwe.mode≠each-iter | pre-flight | ABORT_NO_DRIVER (terminate without ScheduleWakeup). NB: copilotSwe.mode=each-iter IS a Mode Y driver — not an error. |
+| Config: no driver at all — no per-iter reviewer in {cursor,copilot,codex,copilotSwe(review-score)} AND copilotSwe.mode≠each-iter | pre-flight | ABORT_NO_DRIVER (terminate without ScheduleWakeup). NB: copilotSwe.mode=each-iter IS a Mode Y driver, and copilotSwe.mode=review-score IS a Mode X reviewer — neither is an error. |
 | Config: primaryFixer=claude conflicts with copilotSwe.mode=each-iter | pre-flight | ABORT |
 | Config: ambiguous fixer (per-iter reviewer + copilotSwe each-iter, primaryFixer=auto) | pre-flight | ABORT |
 | PR closed or merged | 2 | SUCCESS_STOP |

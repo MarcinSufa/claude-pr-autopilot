@@ -51,6 +51,11 @@ The loop runs unattended until success or a safety guard fires. See [`skills/ste
 Set `prAutopilot.primaryFixer` to `auto` (default), `claude` (force X), or
 `copilotSwe` (force Y).
 
+**No Cursor Pro?** Set `copilotSwe.mode: "review-score"` — the Copilot SWE Agent reviews
+**review-only** and emits a `Readiness: X/5` verdict the loop gates on (just like Cursor's
+`Score: N/5`), with Claude as the fixer. A Cursor-style 1–5 gate using only your Copilot
+seat. See [`reviewers/COPILOT-SETUP.md`](reviewers/COPILOT-SETUP.md).
+
 ### Auto-trigger (v0.3, beta)
 
 Enable the plugin, then `/pr-autopilot:allow <owner/repo>` (or no arg for the current repo).

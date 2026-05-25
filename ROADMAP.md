@@ -8,7 +8,7 @@ Manual `/loop /pr-autopilot:step <PR#>` after `/ship`. Default config: Cursor pr
 
 Phase 1 EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24 — see EVAL.md) **must pass on a real exo-vault PR before bumping to v1.0.0**.
 
-## v0.2 — Two-mode rotation (current)
+## v0.2 — Two-mode rotation (shipped)
 
 First-class Mode X (Claude fixes, agent reviews) AND Mode Y (Copilot SWE Agent
 fixes, Claude reviews against PUSHBACK.md). Mode-aware pre-flight, primaryFixer

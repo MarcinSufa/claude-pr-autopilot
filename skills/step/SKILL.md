@@ -55,7 +55,7 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 }
 ```
 
-**Auto-merge config (v0.4):** `prAutopilot.autoMerge` tunes the *target* + *method* guards for `safeAutoMerge` (see §"Auto-merge"). Safe hardcoded defaults shown above — it works with zero config. The per-repo **opt-in itself is file-based** (`~/.pr-autopilot/automerge-repos`, separate from v0.3's `allowed-repos`); absent ⇒ auto-merge OFF everywhere and behavior is identical to v0.3 (notify-and-stop).
+**Auto-merge config (v0.4):** `prAutopilot.autoMerge` tunes the *target* + *method* guards for `safeAutoMerge` (see §"Auto-merge"). Safe hardcoded defaults shown above — it works with zero config. The per-repo **opt-in itself is file-based** (`~/.pr-autopilot/automerge-repos`, separate from v0.3's `allowed-repos`); absent ⇒ auto-merge OFF everywhere; the notify-and-stop control flow is unchanged from v0.3 (the notification just adds a "merge manually" hint).
 
 ## Config → algorithm derivation
 
@@ -280,7 +280,7 @@ if state.autoMergeQueued == true:
     delete $STATE_FILE
     PushNotification("PR #${prNumber} closed without merge", "auto-merge abandoned")
     return  # terminate
-  if pr.mergeStateStatus in {DIRTY, CONFLICTING}:                      # merge can't proceed
+  if pr.mergeStateStatus == "DIRTY":                                   # DIRTY = GitHub's merge-conflict state. There is NO "CONFLICTING" enum value. BLOCKED (branch protection) falls through to the stuck-cap below.
     PushNotification("PR #${prNumber} auto-merge blocked (conflicts)", "resolve, then re-run /pr-autopilot:step ${prNumber}")
     return  # STOP, KEEP state (see "Recovery" in §Error handling)
   state.pollTicksWhileQueued += 1
@@ -488,9 +488,9 @@ if all_per_iter_happy AND unresolved_not_ours.length == 0:
 
   # 9b. All final-pass reviewers clear.
   # 9c. SUCCESS_STOP → hand off to the shared auto-merge gate (v0.4).
-  #     With no opt-in (the default), safeAutoMerge's Gate 1 reproduces the old
-  #     notify-"ready"+delete-state behavior exactly. readySummary preserves this
-  #     mode's existing message for that default path.
+  #     With no opt-in (the default), safeAutoMerge's Gate 1 keeps the old
+  #     notify-ready + delete-state control flow (the message adds a "merge
+  #     manually" hint). readySummary preserves this mode's existing message.
   return safeAutoMerge(prNumber, pr.baseRefName,
                        readySummary="all reviewers green; review summary: <per-reviewer outcomes>")
 
@@ -926,9 +926,9 @@ Shared SUCCESS_STOP handler called from **both** terminal sites — Mode X step 
 ```
 function safeAutoMerge(prNumber, baseRef, readySummary):
   cfg = config.autoMerge   # defaults above if absent
-  canon = "${owner}/${repo}"   # canonical nameWithOwner from `gh repo view`
+  canon = $(gh repo view --json nameWithOwner -q .nameWithOwner)   # canonical owner/repo — same source as /pr-autopilot:allow + :automerge
 
-  # GATE 1 — opt-in. DEFAULT path: absent ⇒ identical to v0.3 (notify "ready" + stop).
+  # GATE 1 — opt-in. DEFAULT path: absent ⇒ same notify-and-stop control flow as v0.3.
   # Match ~/.pr-autopilot/automerge-repos reusing the v0.3 allowlist matching VERBATIM:
   # trim each line, skip blanks, require a '/', compare case-insensitively.
   if NOT lineMatchCaseInsensitive(canon, "~/.pr-autopilot/automerge-repos"):
@@ -970,13 +970,24 @@ function safeAutoMerge(prNumber, baseRef, readySummary):
     ScheduleWakeup(config.pollIntervalSeconds, "/loop /pr-autopilot:step ${prNumber}", "waiting for queued auto-merge to complete")
     return  # go to wait (step 0.6 handles next tick)
 
-  # All gates pass → queue the merge.
-  try:
-    gh pr merge ${prNumber} --auto --${cfg.mergeMethod} --delete-branch
-  on error ("auto-merge ... not enabled" on this repo):
-    # Fall back to a direct merge — safe because CI + reviewers are already green at SUCCESS_STOP.
-    gh pr merge ${prNumber} --${cfg.mergeMethod} --delete-branch
+  # All gates pass → merge. TWO distinct outcomes: --auto QUEUES (async); the direct
+  # fallback merges NOW (sync). They must NOT be conflated — a synchronous merge is
+  # already done, so it must delete state + notify "merged", never set autoMergeQueued.
+  auto = run("gh pr merge ${prNumber} --auto --${cfg.mergeMethod} --delete-branch")   # capture exit + stderr
+  if auto.failed AND auto.stderr matches "auto-merge .* not enabled":
+    # Repo has no merge queue → direct, SYNCHRONOUS squash (CI + reviews already green at SUCCESS_STOP).
+    direct = run("gh pr merge ${prNumber} --${cfg.mergeMethod} --delete-branch")
+    if direct.succeeded:
+      delete $STATE_FILE   # already merged — nothing to wait for
+      PushNotification("PR #${prNumber} merged → ${baseRef}", "direct ${cfg.mergeMethod} (repo has no auto-merge queue). Run /land-and-deploy for ${baseRef}→master + deploy.")
+      return  # merged synchronously — terminate (do NOT set autoMergeQueued / wait)
+    else:
+      # e.g. branch protection needs a human approval the bot can't satisfy
+      PushNotification("PR #${prNumber} auto-merge blocked", "direct merge refused (branch protection?) — merge manually or run /land-and-deploy")
+      delete $STATE_FILE
+      return  # terminate
 
+  # --auto succeeded → merge is QUEUED; GitHub completes it asynchronously.
   state.autoMergeQueued = true
   state.autoMergeAt = now()
   PushNotification("PR #${prNumber} auto-merge queued → ${baseRef}",
@@ -990,7 +1001,7 @@ function safeAutoMerge(prNumber, baseRef, readySummary):
 
 | Gate | Check | On fail |
 |---|---|---|
-| 1 — opt-in | `canon` ∈ `~/.pr-autopilot/automerge-repos`, case-insensitive | notify "ready; merge manually or run /land-and-deploy"; delete state; STOP (**DEFAULT** — zero behavior change) |
+| 1 — opt-in | `canon` ∈ `~/.pr-autopilot/automerge-repos`, case-insensitive | notify "ready; merge manually or run /land-and-deploy"; delete state; STOP (**DEFAULT** — same notify-and-stop control flow as v0.3) |
 | 2 — not paused | `~/.pr-autopilot/paused` absent | notify + STOP |
 | 3 — base safe | `baseRef` ∈ `allowedTargetBranches` AND ∉ `neverMergeToBranches` | notify "run /land-and-deploy"; STOP |
 | 4 — PR ready | `state == OPEN` AND `isDraft == false` | notify + STOP |
@@ -1031,7 +1042,7 @@ Gates 1 (default-off) + 3 (production guard) are the safety floor. `lineMatchCas
 
 | Condition | Behavior |
 |---|---|
-| `--auto` not enabled on repo | fall back to direct `gh pr merge --${mergeMethod} --delete-branch` (CI + reviews already green) |
+| `--auto` not enabled on repo | fall back to direct `gh pr merge --${mergeMethod} --delete-branch` (synchronous; CI + reviews already green). On success → delete state + notify "merged" (do NOT set `autoMergeQueued`/wait); if refused (e.g. branch protection) → notify "blocked" + STOP |
 | Merge blocked (branch protection needs human approval, conflicts, no permission) | step 0.6 notifies; **keeps** state; STOP (no infinite loop) |
 | Queue stuck (open + queued beyond `pollTickCap` ticks) | step 0.6 notifies; STOP; keeps state |
 | PR merged/closed externally while queued | step 0.6 sees `MERGED`/`CLOSED` → cleanup + terminate |

@@ -60,7 +60,7 @@ if state.autoMergeQueued:
     delete $STATE_FILE; notify "PR #N merged to <baseRef>. Run /land-and-deploy for <baseRef>→master + deploy."; return   # SUCCESS, terminate
   if pr.state == CLOSED:
     delete $STATE_FILE; notify "PR #N closed without merge — auto-merge abandoned"; return
-  if pr.mergeStateStatus in {DIRTY, CONFLICTING}:                       # merge can't proceed
+  if pr.mergeStateStatus == DIRTY:                                     # DIRTY = GitHub's merge-conflict state (there is no "CONFLICTING"); BLOCKED falls through to the stuck-cap
     notify "PR #N auto-merge blocked (conflicts) — resolve, then re-run /pr-autopilot:step <N>"; return   # STOP, keep state
   state.pollTicksWhileQueued += 1
   if state.pollTicksWhileQueued >= config.pollTickCap:                  # stuck (e.g. branch protection needs human review)
@@ -136,10 +136,10 @@ All gates must pass to queue the merge. Gates 1 (default-off) + 3 (production gu
 
 | Condition | Behavior |
 |---|---|
-| `--auto` not enabled on repo | fall back to direct `gh pr merge --squash --delete-branch` (CI + reviews already green) |
+| `--auto` not enabled on repo | fall back to direct `gh pr merge --squash --delete-branch` — **synchronous**, merges now (CI + reviews already green). On success → delete state + notify "merged" (NOT "queued", no wait); if refused → notify "blocked" + STOP |
 | Merge blocked (branch protection needs human approval, conflicts, no permission) | notify "auto-merge blocked, see PR #N"; **keep** state file; STOP (do not loop forever) |
 | Queue stuck (open + `autoMergeQueued` beyond `pollTickCap` ticks) | notify "auto-merge still pending after `pollTickCap` ticks — check PR #N / branch protection"; STOP, keep state |
-| PR merged externally while queued | step 2 sees `MERGED` → normal cleanup (scenario 7) |
+| PR merged externally while queued | **step 0.6** (runs before Mode dispatch) sees `MERGED` → cleanup + terminate; it pre-empts step 2 in the queued case |
 | Gate failure | notify + STOP, default notify-and-stop behavior; no merge attempted |
 
 **Recovery from a kept-state STOP (blocked/stuck):** the state file is intentionally retained so nothing is lost. To recover, the user either (a) resolves the PR (e.g. fixes conflicts / gets the required human approval) and re-runs `/pr-autopilot:step <N>` — step 0.6 picks up the queued merge and finishes — or (b) deletes `~/.pr-autopilot/<owner>-<repo>-<N>.json` to abandon. A dedicated `/pr-autopilot:clear <PR#>` is out of scope for v0.4 (manual cleanup documented in README).

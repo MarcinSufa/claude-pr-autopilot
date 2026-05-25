@@ -1,4 +1,4 @@
-# /ship integration — auto-trigger (v0.3, shipped) + Stop-hook auto-chain (Phase 2, not yet)
+# /ship integration — auto-trigger (v0.3) + auto-merge to dev (v0.4) + Stop-hook auto-chain (Phase 2, not yet)
 
 This file is a placeholder. The Phase 2 Stop hook auto-chain is documented in [`docs/DESIGN.md`](docs/DESIGN.md) but NOT IMPLEMENTED in v0.1.0 or v0.2 — it is targeted for v0.3+.
 
@@ -21,6 +21,22 @@ Gates: is-pr-create / draft-skip / allowlist / paused. Kill switch: `/pr-autopil
 (touches `~/.pr-autopilot/paused`); re-enable with `/pr-autopilot:resume`. The paused
 sentinel is the sole kill switch — no env-var disable. Spec:
 `docs/superpowers/specs/2026-05-24-pr-autopilot-v0.3-auto-trigger-design.md`.
+
+## v0.4 behavior (auto-merge to dev — shipped)
+
+When a repo is opted into `/pr-autopilot:automerge`, the loop's SUCCESS_STOP queues a squash merge of
+the PR into the integration branch (`dev`) — **dev-only, CI-gated, never master/main/production**. This
+closes the last manual step *within* the feature→dev flow. The handoff stops there:
+
+```
+pr-autopilot: feature → dev   (auto, opt-in, v0.4)
+you, manually:  dev → master + deploy   (/land-and-deploy)
+```
+
+**pr-autopilot does NOT promote to master or deploy.** After a dev auto-merge lands, run
+`/land-and-deploy` for `dev`→master + deploy. Auto-merge never auto-invokes it — it notifies and
+recommends only. Spec:
+`docs/superpowers/specs/2026-05-24-pr-autopilot-v0.4-auto-merge-design.md`.
 
 ## Why deferred
 

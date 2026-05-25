@@ -5,7 +5,7 @@
 [![smoketest](https://github.com/MarcinSufa/claude-pr-autopilot/actions/workflows/smoketest.yml/badge.svg)](https://github.com/MarcinSufa/claude-pr-autopilot/actions/workflows/smoketest.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
-[![Status: v0.3.0 (pre-1.0)](https://img.shields.io/badge/status-v0.3.0%20pre--1.0-blue.svg)](docs/DESIGN.md)
+[![Status: v0.4.0 (pre-1.0)](https://img.shields.io/badge/status-v0.4.0%20pre--1.0-blue.svg)](docs/DESIGN.md)
 
 A Claude Code marketplace plugin that closes the PR review→fix loop. Cursor reviews your PR (or Copilot / Codex / Claude-self — configurable), Claude reads each review and either fixes the issue or pushes back with reasoning, then pushes the fix and waits for the next round. Stops when all enabled reviewers report success — or hits one of ten independent safety guards.
 
@@ -62,9 +62,30 @@ It's a **best-effort in-session nudge** (Claude Code hooks can't force actions),
 until the live exo-vault dogfood (EVAL scenario 28) confirms the full auto-chain**. If the
 nudge is ever missed, the manual `/pr-autopilot:step <PR#>` path still works.
 
+### Auto-merge (v0.4, beta)
+
+`/pr-autopilot:automerge <owner/repo>` (or no arg for the current repo) opts a repo into **safe
+auto-merge**: when the loop reaches SUCCESS on a PR targeting `dev`, autopilot queues a squash
+merge instead of just notifying. It is **dev-only, CI-gated, and never merges to
+`master`/`main`/`production`** (production promotion stays manual via `/land-and-deploy`).
+Default (repo not opted in) = OFF, behavior identical to v0.3.
+
+- **Separate allowlist.** Auto-merge uses `~/.pr-autopilot/automerge-repos`, distinct from v0.3's
+  `allowed-repos`. **Full hands-off needs BOTH:** `/pr-autopilot:allow <repo>` (auto-start the loop)
+  AND `/pr-autopilot:automerge <repo>` (auto-merge at the end).
+- **Queued ≠ merged.** `gh pr merge --auto` *queues*; GitHub completes the merge asynchronously once
+  required checks and branch protection clear. Autopilot reports "queued", keeps polling, and notifies
+  again on the actual merge. If a repo doesn't have GitHub auto-merge enabled, it falls back to a direct
+  squash (safe — CI + reviewers are already green).
+- **Laptop must stay awake.** Like the v0.3 loop, merge-wait ticks use `ScheduleWakeup`, so the machine
+  must stay on until the queued merge completes.
+- **Shared kill switch.** `/pr-autopilot:pause` suppresses auto-merge too; `/pr-autopilot:resume` restores.
+
+**Beta until the live exo-vault dogfood** (queue → merge → cleanup on a real dev-targeted PR) flips it to GA.
+
 ## Status
 
-**v0.3.0 — auto-trigger (pre-1.0).** Mode X + Mode Y rotation (v0.2) plus in-session auto-trigger (v0.3, beta) shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them. Auto-merge to dev (v0.4) follows.
+**v0.4.0 — safe auto-merge (pre-1.0).** Mode X + Mode Y rotation (v0.2), in-session auto-trigger (v0.3, beta), and opt-in dev-only auto-merge (v0.4, beta) shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them.
 
 ## Setup
 

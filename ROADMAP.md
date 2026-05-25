@@ -14,11 +14,15 @@ First-class Mode X (Claude fixes, agent reviews) AND Mode Y (Copilot SWE Agent
 fixes, Claude reviews against PUSHBACK.md). Mode-aware pre-flight, primaryFixer
 config. Spec: docs/superpowers/specs/2026-05-23-pr-autopilot-v0.2-rotation-design.md.
 
-## v0.3 — Auto-trigger (in progress)
+## v0.3 — Auto-trigger (shipped)
 Plugin-shipped PostToolUse hook (`if:Bash(gh pr create)`) + `/pr-autopilot:allow` allowlist + `/pause`/`/resume`. In-session best-effort nudge. (Mode Y final-pass is NOT here — deferred to its own later spec.)
 
-## v0.4 — Safe auto-merge to dev
-`gh pr merge --auto` to dev only (never master), guarded by neverMergeToBranches.
+## v0.4 — Safe auto-merge to dev (current)
+Opt-in `/pr-autopilot:automerge` allowlist (separate from v0.3's `allowed-repos`) → `gh pr merge --auto --squash`
+to **dev only**, never master/main/production (positive `allowedTargetBranches` allowlist + `neverMergeToBranches`
+blocklist), CI-gated, queued-vs-merged handled by a merge-wait short-circuit (step 0.6). Falls back to a direct
+squash when a repo lacks GitHub auto-merge. Never auto-invokes `/land-and-deploy` (notify + recommend only).
+Spec: docs/superpowers/specs/2026-05-24-pr-autopilot-v0.4-auto-merge-design.md.
 
 ## v0.5 / Future — Cursor-native runtime adapter (Path C)
 Port the loop layer to Cursor primitives. Algorithm unchanged; only the loop driver moves.

@@ -45,10 +45,17 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
       "default-pnpm": [{"cmd": "pnpm run typecheck"}, {"cmd": "pnpm run lint"}, {"cmd": "pnpm test"}],
       "default-npm":  [{"cmd": "npm run typecheck"},  {"cmd": "npm run lint"},  {"cmd": "npm test"}],
       "default-yarn": [{"cmd": "yarn typecheck"},     {"cmd": "yarn lint"},     {"cmd": "yarn test"}]
+    },
+    "autoMerge": {
+      "allowedTargetBranches": ["dev"],
+      "neverMergeToBranches": ["master", "main", "production"],
+      "mergeMethod": "squash"
     }
   }
 }
 ```
+
+**Auto-merge config (v0.4):** `prAutopilot.autoMerge` tunes the *target* + *method* guards for `safeAutoMerge` (see §"Auto-merge"). Safe hardcoded defaults shown above — it works with zero config. The per-repo **opt-in itself is file-based** (`~/.pr-autopilot/automerge-repos`, separate from v0.3's `allowed-repos`); absent ⇒ auto-merge OFF everywhere and behavior is identical to v0.3 (notify-and-stop).
 
 ## Config → algorithm derivation
 
@@ -206,7 +213,7 @@ State schema:
 
 ```json
 {
-  "stateSchemaVersion": 2,
+  "stateSchemaVersion": 3,
   "prNumber": 0,
   "repo": "<owner>/<name>",
   "headRef": "<branch>",
@@ -218,6 +225,10 @@ State schema:
   "pollTicksWithoutReview": 0,
   "pollTicksWithoutActivity": 0,
   "ticksWithoutProgress": 0,
+
+  "autoMergeQueued": false,
+  "autoMergeAt": "<iso>",
+  "pollTicksWhileQueued": 0,
   "lastHandledHeadOid": "<sha>",
   "lastSeenReviewId": "<gh-review-id>",
   "lastTriggerAt": "<iso>",
@@ -242,7 +253,9 @@ State schema:
 
 **Key changes from v0.1 state:**
 
-- `stateSchemaVersion: 2` — bumped from implicit v1 (no field). Migration: state files without `stateSchemaVersion` are treated as v1 (Mode X) and require fresh start if user switches to Mode Y.
+- `stateSchemaVersion: 3` — bumped from v2 (v0.2) for the v0.4 auto-merge fields. Migration is purely additive: a v2 file loads with `autoMergeQueued: false`, `pollTicksWhileQueued: 0` (defaults); no fresh start needed. The v1 handling below is unchanged.
+- `stateSchemaVersion` absent (implicit v1) — treated as v1 (Mode X) and requires a fresh start if the user switches to Mode Y. The `state.stateSchemaVersion is None` Mode-Y ABORT guard (Y.0.5) still keys off "field absent", so the v2→v3 bump does not affect it.
+- **Auto-merge fields (v0.4):** `autoMergeQueued` — set true once `gh pr merge` is called; read by **step 0.6** (short-circuit into merge-wait) and **gate 6** (avoid re-queue). `autoMergeAt` — ISO timestamp the merge was queued (telemetry). `pollTicksWhileQueued` — **dedicated** counter incremented ONLY in the step-0.6 merge-wait branch, compared to `pollTickCap` for stuck-queue detection; NOT `pollTicksWithoutReview` / `pollTicksWithoutActivity` (those drive the review lifecycle). State is deleted only when step 0.6 observes `MERGED`/`CLOSED`, never when the merge is merely queued — "queued" ≠ "merged".
 - `resolvedMode` — persisted on first tick; mode-drift guard (Y.0.5) aborts if config-derived mode differs from stored mode.
 - `pushbackReplies` (v0.1) → **split into** `threadPushbacks` (Mode X, was Mode X-only in practice anyway) and `commitPushbacks` (Mode Y new).
 - `handledOids`, `handledCommentIds`, `lastTriggerAt`, `pollTicksWithoutActivity`, `reviewIteration` — all Mode Y additions.
@@ -252,10 +265,38 @@ State schema:
 
 **Migration decision:** v1 state files (no `stateSchemaVersion` field) are treated as Mode X; if the current derived mode is Y, ABORT with a message telling the user to delete the stale state file to start fresh in Mode Y.
 
+### 0.6 Merge-wait short-circuit (v0.4 — runs BEFORE Mode dispatch)
+
+If a previous tick queued an auto-merge (`state.autoMergeQueued == true`), this tick is waiting for GitHub to **complete** the queued merge — not for reviewers. Short-circuit here, *before* the Mode dispatch, so neither Mode X (step 9a final-pass) nor Mode Y (Y.5 `@copilot` re-trigger, Y.6 idle-counting) re-runs review logic on a PR that is merely waiting to merge. Placement is load-bearing: `safeAutoMerge` is called from BOTH modes, so a queued **Mode Y** loop must be caught here too — and running before Mode dispatch also pre-empts the generic Y.2 `MERGED` cleanup so the tailored "merged → run /land-and-deploy" message wins.
+
+```
+if state.autoMergeQueued == true:
+  pr = gh pr view ${prNumber} --json state,isDraft,mergeStateStatus,baseRefName
+  if pr.state == "MERGED":
+    delete $STATE_FILE
+    PushNotification("PR #${prNumber} merged → ${pr.baseRefName}", "Run /land-and-deploy for ${pr.baseRefName}→master + deploy.")
+    return  # SUCCESS, terminate
+  if pr.state == "CLOSED":
+    delete $STATE_FILE
+    PushNotification("PR #${prNumber} closed without merge", "auto-merge abandoned")
+    return  # terminate
+  if pr.mergeStateStatus in {DIRTY, CONFLICTING}:                      # merge can't proceed
+    PushNotification("PR #${prNumber} auto-merge blocked (conflicts)", "resolve, then re-run /pr-autopilot:step ${prNumber}")
+    return  # STOP, KEEP state (see "Recovery" in §Error handling)
+  state.pollTicksWhileQueued += 1
+  if state.pollTicksWhileQueued >= config.pollTickCap:                 # stuck (e.g. branch protection needs human review)
+    PushNotification("PR #${prNumber} auto-merge still pending", "after ${config.pollTickCap} ticks — check PR / branch protection")
+    saveState($STATE_FILE)
+    return  # STOP, KEEP state
+  saveState($STATE_FILE)
+  ScheduleWakeup(config.pollIntervalSeconds, "/loop /pr-autopilot:step ${prNumber}", "waiting for queued auto-merge to complete")
+  return  # still queued — wait; skip steps 1-11 AND Mode dispatch
+```
+
 **Mode dispatch** — after pre-flight resolves `mode` and loads state, route to the Mode Y algorithm or fall through to Mode X:
 
 ```python
-# After pre-flight resolves `mode` and the mode-drift guard:
+# After pre-flight resolves `mode`, the mode-drift guard, AND step 0.6:
 if mode == "Y":
   return prAutopilotStepModeY(prNumber)   # see "Algorithm: Mode Y" below
 # else fall through to Mode X (steps 1-11.5 unchanged)
@@ -445,10 +486,13 @@ if all_per_iter_happy AND unresolved_not_ours.length == 0:
         read git diff origin/${pr.baseRefName}..HEAD
         emit 1-5 score against rubric; if < 5 → PAUSE
 
-  # 9b. All clear
-  PushNotification("PR #${prNumber} ready", "all reviewers green; review summary: <per-reviewer outcomes>")
-  delete $STATE_FILE
-  return  # SUCCESS_STOP (terminate)
+  # 9b. All final-pass reviewers clear.
+  # 9c. SUCCESS_STOP → hand off to the shared auto-merge gate (v0.4).
+  #     With no opt-in (the default), safeAutoMerge's Gate 1 reproduces the old
+  #     notify-"ready"+delete-state behavior exactly. readySummary preserves this
+  #     mode's existing message for that default path.
+  return safeAutoMerge(prNumber, pr.baseRefName,
+                       readySummary="all reviewers green; review summary: <per-reviewer outcomes>")
 
 # Some reviewer not happy yet — fall through to triage + fix
 ```
@@ -828,12 +872,13 @@ if pause_verdicts:
   return  # PAUSE (terminate)
 
 if not pushback_verdicts:  # all APPROVE
-  push_notification(
-    f"PR #{pr_number} ready",
-    f"Mode Y: SWE Agent fixes APPROVED by Claude (iteration {state.reviewIteration})"
+  # SUCCESS_STOP → shared auto-merge gate (v0.4). Same gates as Mode X; no Mode Y
+  # final-pass in v0.2. Default (no opt-in) path reproduces the old notify+delete,
+  # preserving this mode's message via readySummary.
+  return safeAutoMerge(
+    pr_number, pr.baseRefName,
+    readySummary=f"Mode Y: SWE Agent fixes APPROVED by Claude (iteration {state.reviewIteration})"
   )
-  delete(STATE_FILE)
-  return  # SUCCESS_STOP (terminate, no Mode Y final-pass in v0.2)
 
 # else: pushback_verdicts non-empty — re-trigger SWE Agent
 # (fix from 2nd code review Blocker 2 — structured review comment alone
@@ -868,6 +913,92 @@ return  # CONTINUE
 
 **The `is_refusal` and `is_approval_prose` heuristics** are simple regex over comment body, defined in the Helper functions (Mode Y) subsection above; simple regex over the comment body.
 
+## Auto-merge: `safeAutoMerge(prNumber, baseRef, readySummary)` (v0.4)
+
+Shared SUCCESS_STOP handler called from **both** terminal sites — Mode X step 9c and Mode Y Y.10 — with the **same gates**. It applies the auto-merge gates; if all pass it queues the merge and lets **step 0.6** finish the job on a later tick. If any gate fails it falls back to the existing notify-and-stop (the v0.3 default — unchanged when no repo is opted in).
+
+`readySummary` is the caller's mode-specific success summary, used only in the Gate-1 default notification so each mode keeps its existing "ready" message.
+
+**Config:** read `prAutopilot.autoMerge` from `~/.claude/settings.json` (defaults: `allowedTargetBranches=["dev"]`, `neverMergeToBranches=["master","main","production"]`, `mergeMethod="squash"`).
+
+**Notification discipline:** exactly ONE notification per terminal outcome. A gate failure fires its single "ready / not-merged" message and deletes state (loop done, manual merge). The queue path fires only the "auto-merge queued" message and KEEPS state. No double-notifying.
+
+```
+function safeAutoMerge(prNumber, baseRef, readySummary):
+  cfg = config.autoMerge   # defaults above if absent
+  canon = "${owner}/${repo}"   # canonical nameWithOwner from `gh repo view`
+
+  # GATE 1 — opt-in. DEFAULT path: absent ⇒ identical to v0.3 (notify "ready" + stop).
+  # Match ~/.pr-autopilot/automerge-repos reusing the v0.3 allowlist matching VERBATIM:
+  # trim each line, skip blanks, require a '/', compare case-insensitively.
+  if NOT lineMatchCaseInsensitive(canon, "~/.pr-autopilot/automerge-repos"):
+    PushNotification("PR #${prNumber} ready", "${readySummary} — merge manually or run /land-and-deploy")
+    delete $STATE_FILE
+    return  # SUCCESS_STOP (unchanged v0.3 default)
+
+  # GATE 2 — not paused (shared kill switch with v0.3).
+  if exists "~/.pr-autopilot/paused":
+    PushNotification("PR #${prNumber} ready (auto-merge paused)", "${readySummary} — paused sentinel present; merge manually or /pr-autopilot:resume")
+    delete $STATE_FILE
+    return  # SUCCESS_STOP
+
+  # GATE 3 — base safe. Positive allowlist AND blocklist (production guard).
+  if (baseRef NOT in cfg.allowedTargetBranches) OR (baseRef in cfg.neverMergeToBranches):
+    PushNotification("PR #${prNumber} ready", "PR targets ${baseRef} — not an auto-merge target. Run /land-and-deploy.")
+    delete $STATE_FILE
+    return  # SUCCESS_STOP
+
+  # GATE 4 — PR ready (open + non-draft).
+  pr_now = gh pr view ${prNumber} --json state,isDraft
+  if pr_now.state != "OPEN" OR pr_now.isDraft == true:
+    PushNotification("PR #${prNumber} not auto-merged", "PR not open/non-draft at SUCCESS_STOP — merge manually")
+    delete $STATE_FILE
+    return  # SUCCESS_STOP
+
+  # GATE 5 — CI green on current headRefOid (same logic as step 5 / Y.4.5).
+  required_checks = pr.statusCheckRollup | filter where isRequired   # `pr` fetched at step 1 / Y.1
+  if any required check NOT green (conclusion != SUCCESS or still pending):
+    PushNotification("PR #${prNumber} ready", "reviewers green but CI not green — not auto-merging; merge manually after CI passes")
+    delete $STATE_FILE
+    return  # SUCCESS_STOP
+
+  # GATE 6 — idempotent. Defensive: step 0.6 normally short-circuits a queued PR
+  # before we ever reach here. If reached with autoMergeQueued already true, do NOT
+  # re-queue — fall into the wait instead.
+  if state.autoMergeQueued == true:
+    saveState($STATE_FILE)
+    ScheduleWakeup(config.pollIntervalSeconds, "/loop /pr-autopilot:step ${prNumber}", "waiting for queued auto-merge to complete")
+    return  # go to wait (step 0.6 handles next tick)
+
+  # All gates pass → queue the merge.
+  try:
+    gh pr merge ${prNumber} --auto --${cfg.mergeMethod} --delete-branch
+  on error ("auto-merge ... not enabled" on this repo):
+    # Fall back to a direct merge — safe because CI + reviewers are already green at SUCCESS_STOP.
+    gh pr merge ${prNumber} --${cfg.mergeMethod} --delete-branch
+
+  state.autoMergeQueued = true
+  state.autoMergeAt = now()
+  PushNotification("PR #${prNumber} auto-merge queued → ${baseRef}",
+                   "${cfg.mergeMethod}; completes when checks/branch-protection clear. Run /land-and-deploy for ${baseRef}→master + deploy.")
+  saveState($STATE_FILE)   # do NOT delete — "queued" ≠ "merged"
+  ScheduleWakeup(config.pollIntervalSeconds, "/loop /pr-autopilot:step ${prNumber}", "waiting for queued auto-merge to complete")
+  return  # merge queued — step 0.6 handles subsequent ticks
+```
+
+**Gate semantics (precise):**
+
+| Gate | Check | On fail |
+|---|---|---|
+| 1 — opt-in | `canon` ∈ `~/.pr-autopilot/automerge-repos`, case-insensitive | notify "ready; merge manually or run /land-and-deploy"; delete state; STOP (**DEFAULT** — zero behavior change) |
+| 2 — not paused | `~/.pr-autopilot/paused` absent | notify + STOP |
+| 3 — base safe | `baseRef` ∈ `allowedTargetBranches` AND ∉ `neverMergeToBranches` | notify "run /land-and-deploy"; STOP |
+| 4 — PR ready | `state == OPEN` AND `isDraft == false` | notify + STOP |
+| 5 — CI green | all required checks green on `headRefOid` | notify "CI not green — not auto-merging"; STOP |
+| 6 — idempotent | `state.autoMergeQueued != true` | skip re-queue; go to wait |
+
+Gates 1 (default-off) + 3 (production guard) are the safety floor. `lineMatchCaseInsensitive` reuses the v0.3 auto-trigger gate-script matching helper verbatim.
+
 ## Stop conditions summary
 
 | Condition | Step | Outcome |
@@ -890,6 +1021,22 @@ return  # CONTINUE
 | Local pre-commit suite failed | 11 | ABORT |
 | `stallTickCap` ticks with same review and zero actions (stall) | 11.5 | PAUSE |
 | Final-pass reviewer disagrees | 9a | PAUSE |
+| Reviewers green, auto-merge gate fails (not opted-in / paused / base unsafe / not-ready / CI not green) | 9c / Y.10 (`safeAutoMerge` gates 1–5) | SUCCESS_STOP (notify "ready", manual merge) |
+| Reviewers green, all auto-merge gates pass → merge queued, waiting for GitHub | 9c / Y.10 → 0.6 | CONTINUE (wait) |
+| Auto-merge blocked (conflicts / `mergeStateStatus` DIRTY) | 0.6 | STOP (KEEP state) |
+| Auto-merge stuck (`pollTickCap` ticks while queued) | 0.6 | STOP (KEEP state) |
+| PR merged after queue | 0.6 | SUCCESS_STOP (state deleted) |
+
+## Error handling (auto-merge, v0.4)
+
+| Condition | Behavior |
+|---|---|
+| `--auto` not enabled on repo | fall back to direct `gh pr merge --${mergeMethod} --delete-branch` (CI + reviews already green) |
+| Merge blocked (branch protection needs human approval, conflicts, no permission) | step 0.6 notifies; **keeps** state; STOP (no infinite loop) |
+| Queue stuck (open + queued beyond `pollTickCap` ticks) | step 0.6 notifies; STOP; keeps state |
+| PR merged/closed externally while queued | step 0.6 sees `MERGED`/`CLOSED` → cleanup + terminate |
+
+**Recovery from a kept-state STOP (blocked/stuck):** state is retained so nothing is lost. Either (a) resolve the PR (fix conflicts / obtain the required human approval) and re-run `/pr-autopilot:step <PR#>` — step 0.6 picks up the queued merge and finishes — or (b) delete `~/.pr-autopilot/<owner>-<repo>-<N>.json` to abandon. A dedicated `/pr-autopilot:clear` is out of scope for v0.4.
 
 ## See also
 

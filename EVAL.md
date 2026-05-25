@@ -83,8 +83,16 @@ gh pr view <PR#> --json reviews --jq '.reviews[].author.login' | sort -u
 | 28 | **Auto-trigger: happy auto-chain** (live dogfood) | allowed repo, non-draft, not paused; run `/ship` | hook nudges → Claude resolves PR# → ScheduleWakeup starts the loop → loop runs to its normal terminal state |
 | 29 | **Auto-trigger: duplicate guard** | PR already has a `~/.pr-autopilot/<owner>-<repo>-<N>.json` state file | nudge's idempotency clause → Claude does NOT start a second loop |
 | 30 | **Auto-trigger: nudge ignored (fail-safe)** | hook nudges but Claude finishes /ship without acting | no error, no state corruption; manual `/pr-autopilot:step <N>` still works |
+| 31 | **Auto-merge off (default)** | repo NOT in `automerge-repos`, loop SUCCEEDs | `safeAutoMerge` Gate 1 fails → PushNotification "ready; merge manually" + delete state + STOP; **no `gh pr merge`**. Confirms zero behavior change by default. |
+| 32 | **Base master blocked** | opt-in repo, PR base = master, reviewers green | Gate 3 refuses; notify "targets master — run /land-and-deploy"; no merge; state deleted |
+| 33 | **Happy queue** | opt-in repo, base = dev, non-draft, CI green | `gh pr merge <N> --auto --squash --delete-branch` called **once**; notify says **queued**; `autoMergeQueued=true`, `autoMergeAt` set; state **kept** |
+| 34 | **Idempotent** | next tick with `autoMergeQueued=true` | step 0.6 short-circuits (before Mode dispatch) into merge-wait; merge is NOT re-queued (Gate 6 is the defensive backstop); no re-trigger of reviewers |
+| 35 | **Paused suppresses merge** | `~/.pr-autopilot/paused` present, opt-in repo, loop SUCCEEDs | Gate 2 refuses; no merge; notify "ready (auto-merge paused)" |
+| 36 | **Queued→merged cleanup** | after queue, a later tick observes `pr.state == MERGED` | step 0.6 deletes state file, notifies "merged → dev; run /land-and-deploy", terminates |
+| 37 | **Direct-merge fallback** | opt-in repo, base dev, repo does NOT have GitHub auto-merge enabled | `gh pr merge --auto` errors → fall back to direct `gh pr merge --squash --delete-branch` (CI + reviews already green); notify accordingly |
+| 38 | **Blocked-merge state cleanup** | merge-wait hits `mergeStateStatus` DIRTY (or stuck past `pollTickCap`) | step 0.6 STOPs **keeping** state; verify documented recovery — resolve PR + re-run `/pr-autopilot:step <N>`, OR delete `~/.pr-autopilot/<owner>-<repo>-<N>.json` — clears the zombie state |
 
-31 test cases (1-19 + 20a + 20b + 21 + 22-30, with 17 renamed 17Y) + 1 pre-flight step. 8 gating (1, 4, 8, 11, 17Y, 22, 23, 24); auto-trigger scenarios 25-30 added in v0.3.
+39 test cases (1-19 + 20a + 20b + 21 + 22-38, with 17 renamed 17Y) + 1 pre-flight step. 8 gating (1, 4, 8, 11, 17Y, 22, 23, 24); auto-trigger scenarios 25-30 added in v0.3; auto-merge scenarios 31-38 added in v0.4 (31/33/34/36 cover the happy queue→merge lifecycle; 32/35 the safety gates; 37/38 fallback + recovery).
 
 ---
 

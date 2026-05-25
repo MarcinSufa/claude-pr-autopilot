@@ -2,11 +2,14 @@
 
 > **PARTIALLY SUPERSEDED:** Mode Y / rotation behavior is now specified in
 > `docs/superpowers/specs/2026-05-23-pr-autopilot-v0.2-rotation-design.md`.
-> Sections here on auto-trigger and auto-merge remain canonical until the
-> v0.3 / v0.4 specs land. Auto-trigger is now specified in
+> Auto-trigger is specified in
 > `docs/superpowers/specs/2026-05-24-pr-autopilot-v0.3-auto-trigger-design.md`;
 > any `PR_AUTOPILOT_DISABLE` reference here is superseded by the
-> `~/.pr-autopilot/paused` sentinel.
+> `~/.pr-autopilot/paused` sentinel. **Auto-merge is now specified in
+> `docs/superpowers/specs/2026-05-24-pr-autopilot-v0.4-auto-merge-design.md`** —
+> the "user merges manually" / "no automatic merge after 5/5" statements below are
+> superseded for repos opted into `/pr-autopilot:automerge` (opt-in, dev-only, CI-gated,
+> never master/main/production).
 
 **Date:** 2026-05-23 (revised eight times — three Composer 2.5 review rounds, v4 rename + packaging, v4-final CLEARED, v5 multi-reviewer matrix, v6 stack alignment, v6-final CONDITIONAL CLEAR resolved: 8 blockers + 6 nits baked in — non-goals/Phase 1 scope/loop outcome/state-file counter/EVAL 2/ScheduleWakeup reason/Actors table/STOP pseudocode aligned with multi-reviewer reality; new config→algorithm derivation table; EVAL step 0 expanded to both Cursor and Copilot; scenario 21 covers leftover-Copilot edge case)
 **Status:** ✅ **CLEARED by Composer v6-final review** (9.5/10 design, 9.5/10 spec consistency, 9/10 Phase 1 shippability). Ready for Phase 1 implementation.
@@ -189,7 +192,7 @@ The filename `2026-05-23-grep-loop-skill-design.md` is preserved despite the ren
 - Per-repo `loop-rules.md` config file (defer until `PUSHBACK.md` proves insufficient)
 - Cloud / scheduled-routine variant (laptop must be on while loop runs — bold callout in `CURSOR-SETUP.md`)
 - Greptile / CodeRabbit as primary reviewers (not in v0.1.0 — would need new adapters; Cursor / Copilot / Codex / claudeSelf adapters ARE supported via the multi-reviewer framework added in v5)
-- Automatic merge after 5/5 — user always eyeballs and clicks merge
+- Automatic merge after 5/5 — user always eyeballs and clicks merge. **(Superseded in v0.4: opt-in `/pr-autopilot:automerge` queues a dev-only, CI-gated squash merge; master/main/production stay manual. See the v0.4 spec.)**
 - Reviewing reviewers other than those listed in the per-reviewer config block (`reviewers.cursor.login`, `reviewers.copilot.login`, etc.)
 
 ## Phase 1 / Phase 2 plan
@@ -423,6 +426,8 @@ User or Claude invokes /ship
    │
    ▼
 User returns → reads PR → merges manually
+   (v0.4: if the repo is opted into /pr-autopilot:automerge and the PR targets dev,
+    autopilot queues the squash merge itself — dev-only, CI-gated, never master)
 ```
 
 ## Algorithm: single iteration of `/pr-autopilot:step <PR#>`

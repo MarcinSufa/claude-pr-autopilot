@@ -235,7 +235,7 @@ Reviewer combos: (a) cursor only — `any_xreviewer=true, swe_each=false`; (b) c
 | `copilotSwe` | Y** | Y | Y | Y** |
 | `auto` | X | Y | ABORT_CONFIG (ambiguous) | ABORT_NO_DRIVER |
 
-\* `derive_mode` returns "X" for claude+(d), but pre-flight immediately ABORTs: "Mode X requires at least one per-iter reviewer in {cursor, copilot, codex}" — no X-reviewer is enabled. End result is an ABORT, via pre-flight not derive_mode.
+\* `derive_mode` returns "X" for claude+(d), but pre-flight immediately ABORTs: "Mode X requires at least one per-iter reviewer in {cursor, copilot, codex, copilotSwe(review-score)}" — no X-reviewer is enabled. End result is an ABORT, via pre-flight not derive_mode.
 
 \*\* `derive_mode` returns "Y" for copilotSwe+{a,d}, but pre-flight immediately ABORTs: "Mode Y requires copilotSwe.mode=each-iter" — the required config is absent. End result is an ABORT, via pre-flight not derive_mode.
 

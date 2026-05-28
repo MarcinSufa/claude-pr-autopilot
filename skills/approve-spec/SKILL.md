@@ -5,7 +5,7 @@ description: User-only gate from spec to TDD. Uses AskUserQuestion interactive p
 
 # /pr-autopilot:approve-spec
 
-The hard gate between spec lifecycle and code lifecycle. **Must be invoked by user**, not autonomously by agent — the AskUserQuestion primitive is the cryptographically-equivalent guarantee (interactive UI element that requires physical click).
+The hard gate between spec lifecycle and code lifecycle. **Must be invoked by user**, not autonomously by agent — the AskUserQuestion primitive is the strongest available guarantee at the harness layer (interactive UI element that requires a physical click; the conversation transcript captures the user's literal selection). It is NOT cryptographic — agent edits to the claim file remain a defense-in-depth limit documented in the spec.
 
 Full algorithm + gate strength analysis: `docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5-pre-pr-lifecycle-design.md` (v2.2 §`/approve-spec` + §`enforce-spec-gate.sh`).
 
@@ -68,10 +68,10 @@ Full algorithm + gate strength analysis: `docs/superpowers/specs/2026-05-28-pr-a
 5. **Echo to agent:**
    ```
    ✅ Spec APPROVED by <user-id> at <iso>.
-   
+
    Sub-status: implementing
    Hard gate: LIFTED — PreToolUse hook will allow Write/Edit outside specs/.
-   
+
    Next steps:
    1. TDD red → green → refactor per CLAUDE.md rule #4
    2. When PR opens via `gh pr create`, run `/pr-autopilot:pr-opened <PR#>` to hand off to v0.4 step loop

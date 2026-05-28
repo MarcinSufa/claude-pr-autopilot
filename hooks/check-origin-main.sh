@@ -16,7 +16,18 @@ REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$REPO_ROOT" || exit 0
 
 # Fetch with timeout. Offline → graceful skip.
-if ! timeout 8 git fetch --quiet origin main 2>/dev/null; then
+# P1-2 (review v2 follow-up): macOS often lacks GNU coreutils `timeout`. Use it when
+# present, otherwise fall back to `git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=8`
+# which kills the fetch after ~8s of stall — same effective behaviour, portable.
+if command -v timeout >/dev/null 2>&1; then
+  FETCH_OK=true
+  timeout 8 git fetch --quiet origin main 2>/dev/null || FETCH_OK=false
+else
+  FETCH_OK=true
+  git -c "http.lowSpeedLimit=1" -c "http.lowSpeedTime=8" fetch --quiet origin main 2>/dev/null || FETCH_OK=false
+fi
+
+if [ "$FETCH_OK" = "false" ]; then
   echo "[pr-autopilot/origin-check] could not fetch origin/main (offline or slow); skipping."
   exit 0
 fi

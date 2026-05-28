@@ -35,20 +35,22 @@ The closing skill of the pre-PR lifecycle — paired symmetrically with `/assign
    ```
    Append `mergedAt` + `mergedInPr` to description markdown.
 
-4. **Update `assignments.yaml` on `main`** (P1-3 v2.1 fix — explicit workflow):
+4. **Update `assignments.yaml` on `main`** (P1-3 v2.1 fix + PR review P1-3 simplification):
    ```bash
-   # Out of feature worktree, into main worktree
-   cd "$(git rev-parse --show-toplevel)/../$(basename $(git -C $(git worktree list --porcelain | head -1 | cut -d' ' -f2) rev-parse --show-toplevel))"
-   # Simpler: just `cd <main worktree>` if you know its path; or `git worktree list` to find it.
-   
+   # Canonical main worktree resolution — first entry in `git worktree list --porcelain`
+   # is always the primary worktree (where main lives). Works for multi-worktree setups,
+   # symlinks, and paths with spaces.
+   MAIN=$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')
+   cd "$MAIN"
+
    git fetch origin main
    git checkout main
    git pull --ff-only origin main   # defensive: abort if local main diverged
-   
+
    # Edit assignments.yaml: locate the entry by id, set status: merged, add merged_at + merged_in_pr
    # Do NOT touch the excludes: array — that's for historical/external context only.
    # Use yq, jq, sed, or direct write depending on what's available.
-   
+
    git add assignments.yaml
    git commit -m "chore(assignments): mark <id> merged in PR #<N>"
    git push origin main             # NO --no-verify (P1-8 fix)
@@ -59,7 +61,7 @@ The closing skill of the pre-PR lifecycle — paired symmetrically with `/assign
        git checkout -b chore/finish-<id>-cleanup
        git push -u origin chore/finish-<id>-cleanup
        gh pr create --base main --title "chore(assignments): mark <id> merged" --body "Post-merge cleanup for #<N>"
-   
+
    Steps 5–7 will continue once that PR merges. Re-run /pr-autopilot:finish <id> after.
    ```
    STOP gracefully (will retry on next invocation).
@@ -85,7 +87,7 @@ The closing skill of the pre-PR lifecycle — paired symmetrically with `/assign
    📋 Newly READY after this merge:
      - admin-d2-agents (deps satisfied)
      - admin-d3-phone-numbers (deps satisfied)
-   
+
    Claim any: /pr-autopilot:assign <id>
    ```
 

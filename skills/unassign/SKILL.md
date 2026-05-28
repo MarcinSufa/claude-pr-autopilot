@@ -80,12 +80,12 @@ Housekeeping skill. Symmetric counterpart to `/assign`. **Destructive** — requ
 10. **Echo confirmation:**
     ```
     ✅ Assignment <id> released.
-    
+
     Worktree: removed
     Local branch: deleted
     Remote branch: <still exists | deleted>
     ExoVault task: reset to todo
-    
+
     /pr-autopilot:assign <id> may be invoked by any agent now.
     ```
 

@@ -78,17 +78,17 @@ Full algorithm + adapter inventory + cursor-cloud poll contract: `docs/superpowe
      ```
      ✅ Spec review complete (iter <n>). Findings: <N> P1, <K> P2 (no P0).
      📋 Reviewers: <list>
-     
+
      Marcin: when ready, run /pr-autopilot:approve-spec.
      (Optional: paste Composer 2.5 findings + re-run /review-spec for additional perspective.)
      ```
    - **≥1 P0** → `subStatus: spec_revising`. Echo aggregated P0 list grouped by reviewer:
      ```
      ⚠️ Spec revision needed (iter <n>). <N> P0 findings:
-     
+
      [P0 from codex-exec, confidence 8/10] <title> — <body>
      ...
-     
+
      Agent: address findings, re-run /pr-autopilot:review-spec.
      ```
 

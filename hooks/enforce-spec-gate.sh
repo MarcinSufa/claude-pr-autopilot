@@ -18,11 +18,16 @@ set -euo pipefail
 # 1. Honor pause sentinel.
 [ -f "$HOME/.pr-autopilot/paused" ] && exit 0
 
-# 2. Honor allowlist (P1-5 v2.1 fix: case-insensitive grep, consistent with /allow).
+# 2. Honor allowlist (P1-5 v2.1 fix: case-insensitive match, consistent with /allow).
+# Uses awk because `grep -qiFx` core-dumps on some Git Bash builds when matching
+# UTF-8 lines — observed by hooks/tests/test-spec-gate.sh T1/T5/T9.
 REPO=$(git -C "$(pwd)" remote get-url origin 2>/dev/null | sed -E 's|.*[:/]([^/]+/[^/.]+)(\.git)?$|\1|' || echo "")
 ALLOWLIST="$HOME/.pr-autopilot/allowed-repos"
-if [ -f "$ALLOWLIST" ] && [ -n "$REPO" ] && ! grep -qiFx "$REPO" "$ALLOWLIST" 2>/dev/null; then
-  exit 0  # not opted in, no gate
+if [ -f "$ALLOWLIST" ] && [ -n "$REPO" ]; then
+  ALLOW_MATCH=$(awk -v r="$REPO" 'tolower($0) == tolower(r) {print "1"; exit}' "$ALLOWLIST" 2>/dev/null)
+  if [ "$ALLOW_MATCH" != "1" ]; then
+    exit 0  # not opted in, no gate
+  fi
 fi
 
 # 3. Parse tool call from stdin.
@@ -30,15 +35,23 @@ INPUT=$(cat)
 TARGET=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null || echo "")
 [ -z "$TARGET" ] && exit 0  # not a path-targeting tool call
 
-# 4. Find current claim file (walk up CWD looking for .claude/assignment-claims/*.json).
+# Normalise Windows paths so the `case` match below works regardless of OS
+# (Claude Code on Windows may pass `C:\repo\specs\foo.md`). P1-5 from v0.5 PR review.
+TARGET=$(printf '%s' "$TARGET" | tr '\\' '/')
+
+# 4. Find current claim file. Claim files live at <repo-root>/.claude/assignment-claims/
+# by convention (spec §"Atomic claim — git as primitive"); no need to walk up the
+# filesystem. This avoids two failure modes uncovered by hooks/tests/test-spec-gate.sh
+# T10: (a) reading a sibling project's claim file, (b) string-mismatch between
+# `pwd` and `git rev-parse --show-toplevel` on Windows (UNIX `/tmp/...` vs `C:/Users/...`).
+REPO_ROOT=$(git -C "$(pwd)" rev-parse --show-toplevel 2>/dev/null || echo "")
 CLAIM=""
-DIR="$(pwd)"
-while [ "$DIR" != "/" ] && [ -n "$DIR" ]; do
-  CANDIDATE=$(find "$DIR/.claude/assignment-claims" -maxdepth 1 -name "*.json" 2>/dev/null | head -1)
-  if [ -n "$CANDIDATE" ]; then CLAIM="$CANDIDATE"; break; fi
-  if [ "$DIR" = "/" ]; then break; fi
-  DIR=$(dirname "$DIR")
-done
+if [ -n "$REPO_ROOT" ] && [ -d "$REPO_ROOT/.claude/assignment-claims" ]; then
+  # The `|| true` guards against `set -e` + `pipefail` killing the script when
+  # find returns non-zero (e.g. directory contains no matches; some bash builds
+  # treat the pipeline exit as fatal under set -euo pipefail).
+  CLAIM=$(find "$REPO_ROOT/.claude/assignment-claims" -maxdepth 1 -name "*.json" 2>/dev/null | head -1 || true)
+fi
 
 # 5. No claim found → outside the pre-PR lifecycle, allow.
 [ -z "$CLAIM" ] && exit 0
@@ -62,8 +75,10 @@ case "$SUB_STATUS" in
 esac
 
 # 8. Pre-approval states: allow only edits to specs/ + claim file itself.
+# Path patterns cover both relative paths (`specs/foo.md` from CWD) and absolute
+# paths (`/repo/specs/foo.md`). P1-pattern fix from v0.5 PR review hook-tests.
 case "$TARGET" in
-  */specs/*|*/.claude/assignment-claims/*)
+  specs/*|*/specs/*|.claude/assignment-claims/*|*/.claude/assignment-claims/*)
     exit 0
     ;;
   *)

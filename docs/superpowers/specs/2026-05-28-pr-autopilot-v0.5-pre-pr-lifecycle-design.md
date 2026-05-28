@@ -325,7 +325,7 @@ Same rubric (PUSHBACK.md). Different wire calls. Same Findings interface.
 2. **AskUserQuestion (mandatory, interactive primitive):**
    > "Approve spec for assignment `<id>`? This unlocks Write/Edit across the entire codebase for this branch. Findings summary: <N P0 findings (resolved), M P1, K P2>. Spec: `<path>`."
    > Options: ✅ Approve · ❌ Reject (back to spec_revising) · 🔵 Show full spec
-   
+
    Agent **cannot fabricate this primitive** — it's an interactive UI element with user-visible chips that the user physically clicks. Conversation transcript shows the user response verbatim, providing audit + forensic trail.
 3. If user picks Approve:
    - Capture `<iso-timestamp>` and `<user-identifier>` (from session context — Claude Code surfaces it via `$CLAUDE_USER` env or session metadata).

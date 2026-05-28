@@ -45,13 +45,13 @@ The handoff between v0.5 pre-PR lifecycle and v0.4 post-PR review loop.
 5. **Echo handoff message:**
    ```
    ✅ PR #<N> linked to assignment <id>. Sub-status: pr_review_requested.
-   
+
    📋 PR: <url>
    📁 Branch: <branch>
-   
+
    Hand off to v0.4 review loop:
        /loop /pr-autopilot:step <PR#>
-   
+
    The step loop will run until reviewers report 5/5 + automerge fires (if enabled).
    After merge, run /pr-autopilot:finish <id> to close the lifecycle.
    ```

@@ -24,7 +24,34 @@ blocklist), CI-gated, queued-vs-merged handled by a merge-wait short-circuit (st
 squash when a repo lacks GitHub auto-merge. Never auto-invokes `/land-and-deploy` (notify + recommend only).
 Spec: docs/superpowers/specs/2026-05-24-pr-autopilot-v0.4-auto-merge-design.md.
 
-## v0.5.1 — Review-spec improvements (this patch)
+## v0.5.2 — Per-reviewer summary table + Gap E probe fix + v0.6 rejection ADR (this patch)
+Patch release on top of v0.5.1. Three changes in a 3-commit-in-1-PR bundle:
+
+- **Gap E (commit 1)** — new probe case 400 → exit 45 with actionable message for
+  Cursor Privacy Mode (Legacy) blocker. Defense in depth: detect via both
+  `error.code` field AND case-insensitive `error.message` grep. Discovered live
+  2026-05-28 when Marcin upgraded to Cursor Pro and Cloud Agent returned 400 with
+  "Cloud agent is not supported in Privacy Mode (Legacy)". v0.5.1 classified as
+  generic exit 44; v0.5.2 surfaces the specific fix (Cursor Settings → Privacy).
+- **Per-reviewer summary table (commit 2)** — Step 4 final status table grows
+  from 4 columns to 6: Reviewer · Model · Score (DERIVED from P0/P1/P2) · Time ·
+  Findings · Verdict. Outlier footer fires when any reviewer's derived Score ≤ 2,
+  surfacing blockers that the aggregate mean would otherwise hide. Bootstrap
+  mode (B-Step 5) uses identical table. Tokens column deliberately dropped
+  (empirical: Cursor API returns null for usage/credits/tokensUsed fields).
+- **v0.6 MCP rejection ADR (commit 3)** — new `docs/decisions/` directory with
+  ADR pattern. ADR 0001 captures the v0.6 MCP server proposal + rejection + 6
+  prerequisites for re-proposal. ROADMAP Anti-roadmap section gains a one-line
+  link (canonical reasoning lives in the ADR, not duplicated here).
+
+Spec: `docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5.2-per-reviewer-summary.md`.
+Test coverage: 16/16 in `hooks/tests/test-review-spec-helpers.sh` (T1-T11 +
+T7b + T8b + T12 + T12b + T13). Three review iterations completed pre-merge
+(2 Claude subagents iter1 + Composer 2.5 iter3 paste-back) — see spec §A audit log.
+
+ROADMAP.md is the release log for this project — no separate CHANGELOG.md.
+
+## v0.5.1 — Review-spec improvements
 Patch release on top of v0.5.0. Four gaps fixed in `/pr-autopilot:review-spec`,
 all discovered during the real onboarding of pr-autopilot into MarcinSufa/asistel:
 
@@ -126,5 +153,6 @@ Ranked by leverage:
 - **Automatic merge to master/production after 5/5** — user always eyeballs the final merge to master. Auto-merge to dev (v0.4) is guarded by `neverMergeToBranches`; production merges stay manual. Safety > speed.
 - **Reviewer-less mode** — pre-flight config validator ABORTs if no per-iter reviewer enabled. Nothing would drive the loop.
 - **Claude-self as primary loop reviewer** — Claude grading Claude converges in one step. Final-pass only by design.
+- **MCP server for review dispatch** — proposed and rejected 2026-05-28. See [ADR 0001](docs/decisions/0001-v0.6-mcp-server-rejected.md).
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for full architecture rationale.

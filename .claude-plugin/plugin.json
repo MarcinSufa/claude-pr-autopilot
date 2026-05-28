@@ -1,7 +1,7 @@
 {
   "name": "pr-autopilot",
-  "version": "0.5.1",
-  "description": "Complete multi-agent dev pipeline. v0.5 adds the pre-PR lifecycle (atomic assignment claim, spec drafting, multi-channel pre-PR review, user-approved TDD gate) on top of v0.4's post-PR review loop. v0.5.1 polishes /review-spec: --bootstrap mode (no claim file required), Composer fenced-block UX, cursor-cloud-agent plan probe, status-table progress visibility. Pick an assignment, walk away, come back when it's merged.",
+  "version": "0.5.2",
+  "description": "Complete multi-agent dev pipeline. v0.5 adds the pre-PR lifecycle (atomic assignment claim, spec drafting, multi-channel pre-PR review, user-approved TDD gate) on top of v0.4's post-PR review loop. v0.5.1 polished /review-spec: --bootstrap mode, Composer fenced-block UX, cursor-cloud-agent plan probe, status-table progress visibility. v0.5.2 adds per-reviewer summary table (Model/Score/Verdict columns + outlier footer), Privacy Mode (Legacy) probe detection (exit 45), and the project's first ADR documenting the rejected v0.6 MCP server proposal. Pick an assignment, walk away, come back when it's merged.",
   "author": {
     "name": "Marcin Sufa",
     "email": "sufa.marcin@gmail.com"

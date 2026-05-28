@@ -145,6 +145,23 @@ These cover `--bootstrap` mode, the cursor-cloud-agent plan probe, the Composer 
 
 48b is Marcin-local dogfood; passes are advisory; cannot count toward v1.0.0 gating (machine-specific path).
 
+### v0.5.2 — Per-reviewer summary table + Gap E probe fix (scenarios 50b, 51)
+
+Two new scenarios + one variant in v0.5.2 (commits 1-3):
+
+| # | Scenario | Trigger | Expected |
+|---|---|---|---|
+| 50b | **Gap E live skip — Privacy Mode (Legacy) on Pro** | Cursor account on Pro plan with Privacy Mode (Legacy) enabled; `/review-spec` (any mode) with `CURSOR_API_KEY` set | probe exit 45; skill logs `⚠️ Cursor Cloud Agent skipped — Privacy Mode (Legacy) blocks Cloud Agent. Disable in Cursor Settings → Privacy.`; `reviewers[]` entry `{kind:"cursor-cloud-agent",status:"skipped",reason:"privacy_mode_legacy"}`. T12 + T12b unit tests cover this scenario in air-gapped form. |
+| 51 | **Per-reviewer summary table — 6 columns + outlier footer** | Run `/review-spec` (normal or bootstrap mode) on any test spec | Step 4 final table renders 6 columns: Reviewer · Model · Score (derived) · Time · Findings · Verdict. Score is derived from P0/P1/P2 per rubric in SKILL.md Step 4. If any reviewer Score ≤ 2: outlier footer fires below aggregate line. Manual visual inspection (Composer/Cursor IDE table render). |
+
+**v0.5.2 gating subset for "field-validated"** (extends v0.5.1; does not replace):
+
+- T12 + T12b + T13 unit tests pass (16/16 total in `test-review-spec-helpers.sh`)
+- 50b validates live (Marcin's account currently on Privacy Mode — non-Legacy — so 50b is satisfied by inversion: probe returns 0; the EVAL would re-fire if Marcin ever toggles back to Legacy)
+- 51 validates on next real `/review-spec` invocation (e.g., the Asistel onboarding bootstrap review)
+
+EVAL 50b was demoted from gating in v0.5.2 (per Composer review iter3 P1-4) — unit tests provide sufficient coverage; live verification optional.
+
 ---
 
 ## Results (updated as gating scenarios run on real PRs)

@@ -1,6 +1,6 @@
 ---
 name: review-spec
-description: Dispatch the pre-PR adapter layer against the current assignment's spec markdown file. Runs 2 Claude subagents (code-reviewer + adversarial self-review) always; runs Codex CLI + Cursor Cloud Agent if env keys set; prints copy-paste prompt for optional Composer 2.5 manual paste-back. Aggregates findings → claim file `review_history` + ExoVault mirror. Flips sub-status to `spec_review_complete` (0 P0) or `spec_revising` (≥1 P0). Use when - "review my spec", "check the spec before approving", "run findings on the design doc".
+description: Dispatch the pre-PR adapter layer against a spec markdown file. Supports two modes — normal (claim-file-driven, lifecycle-integrated) and --bootstrap (standalone, advisory-only, no claim file required). Always runs 2 free Claude subagents (code-reviewer + adversarial); runs Codex CLI + Cursor Cloud Agent if env keys + plan eligibility checks pass; prints copy-paste fenced prompt for optional Composer 2.5 manual paste-back. Prints a progress status table at dispatch and a final aggregated table at completion. Aggregates findings → claim file `review_history` (normal mode) or stdout summary (bootstrap mode). Use when - "review my spec", "check the spec before approving", "run findings on the design doc", "review this draft", "/review-spec --bootstrap <path>".
 ---
 
 # /pr-autopilot:review-spec
@@ -8,99 +8,297 @@ description: Dispatch the pre-PR adapter layer against the current assignment's 
 Pre-PR adapter dispatch on a markdown spec file. Idempotent and re-runnable.
 
 Full algorithm + adapter inventory + cursor-cloud poll contract: `docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5-pre-pr-lifecycle-design.md` (v2.2 §Pre-PR Adapter Layer + §`/review-spec`).
+v0.5.1 changes (this version): `docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5.1-review-spec-improvements.md`.
 
-## Pre-flight
+## Mode detection (READ FIRST — determines control flow)
+
+If the invocation contains `--bootstrap` (either `--bootstrap=<path>` or `--bootstrap <path>`):
+
+→ go to **Bootstrap mode** section. Do NOT proceed to "Pre-flight (normal mode)" or "Steps (normal mode)".
+
+Otherwise (no `--bootstrap` argument):
+
+→ go to **Pre-flight (normal mode)** section. Do NOT proceed to "Bootstrap mode".
+
+Modes are mutually exclusive. Do not run both. If unclear which mode applies, refuse with:
+`[pr-autopilot/review-spec] ambiguous invocation; expected either no args (normal mode) or --bootstrap <path>.`
+
+## Argument parsing protocol
+
+This skill is markdown that Claude interprets. There is no bash `getopts`. The contract for argument parsing:
+
+- The invocation `/pr-autopilot:review-spec` with no arguments → **normal mode**.
+- The invocation `/pr-autopilot:review-spec --bootstrap=<path>` → **bootstrap mode** with `<path>` as the spec file path. The path is the token immediately following the `=` sign.
+- The invocation `/pr-autopilot:review-spec --bootstrap <path>` (whitespace-separated) → **bootstrap mode** with `<path>` as the spec file path. The path is the **first non-flag token** after `--bootstrap`.
+- If the path token itself begins with `--`, Claude MUST treat it as a path (not a flag). E.g., `--bootstrap --weird-name.md` is a path of `--weird-name.md`. (Rare; documented for completeness.)
+- If `--bootstrap` is followed by nothing (end of invocation), refuse with: `[pr-autopilot/review-spec] --bootstrap requires a path argument; got none.`
+- If `--bootstrap` is specified TWICE in the same invocation, refuse with: `[pr-autopilot/review-spec] duplicate --bootstrap flag; only one path is supported per invocation.`
+- Single-dash `-bootstrap` is NOT supported → refuse with `[pr-autopilot/review-spec] unknown flag '-bootstrap'; did you mean '--bootstrap'?`.
+- An additional flag `--force` may appear AFTER the path in bootstrap mode (e.g., `--bootstrap path.md --force`). It disables the enforcement guard. See Bootstrap mode B-Pre-flight step 2.
+- Before running ANY dispatch, Claude MUST verify the path exists via Read tool. If the file does not exist, refuse with: `[pr-autopilot/review-spec] --bootstrap path not found: <path>.`
+
+## Pre-flight (normal mode)
+
+Required preconditions for normal mode:
 
 - Inside a worktree with `.claude/assignment-claims/<id>.json` present.
 - `subStatus` is `spec_drafting`, `spec_revising`, or `spec_review_complete` (re-run after manual paste).
 - Spec file exists at `claimFile.specFile` or auto-detect newest `specs/*-<id>.md`.
 
-## Steps
+If preconditions fail, refuse with the corresponding error. Do NOT silently fall through to bootstrap mode.
 
-1. **Read claim file**. Update `subStatus: spec_review_requested`. Commit:
-   ```bash
-   git add .claude/assignment-claims/<id>.json
-   git commit -m "chore(pr-autopilot): review-spec start for <id> (iter <n+1>)"
+## Bootstrap mode (v0.5.1)
+
+Use cases:
+- A PR that introduces pr-autopilot to a new repo (bootstrap PR has no assignment yet).
+- Reviewing a draft spec before deciding whether to formally assign it.
+- Standalone spec review without lifecycle overhead.
+
+### B-Pre-flight (bootstrap-specific)
+
+1. The `<path>` argument resolves to an existing markdown file (verified via Argument parsing protocol).
+
+2. **Enforcement guard.** Refuse if the current repo is in "real assignment" state. A real assignment state means BOTH conditions hold:
+   - `assignments.yaml` exists at repo root, AND
+   - `.claude/assignment-claims/` directory exists AND contains at least one `.json` file.
+
+   If both: refuse with:
+   ```
+   [pr-autopilot/review-spec] --bootstrap is for repos without active assignments.
+   This repo has assignments.yaml AND active claim file(s).
+   Use /pr-autopilot:assign <id> then /pr-autopilot:review-spec instead.
+   (Override: append --force to this invocation if you really mean to bypass.)
    ```
 
-2. **Dispatch sync adapters in parallel** (single Agent-tool-message with multiple invocations):
+   Rationale: prevent lazy bypass of the lifecycle. Bootstrap mode is for genuinely-bootstrap state, not a shortcut to skip claim files in established projects.
 
-   **Always (FREE):**
-   - **claude-code-reviewer-subagent**: `Agent({ subagent_type: 'feature-dev:code-reviewer', description: 'Pre-PR spec review', prompt: <see template below> })`
-   - **claude-self-review** (hostile, FREE): `Agent({ subagent_type: 'general-purpose', description: 'Adversarial spec review', prompt: <hostile template> })`
+   **Exception:** if `--force` is appended to the invocation, enforcement is skipped. Use case: testing the skill against a real-assignment repo. Always logged with audit signal `[BOOTSTRAP_FORCE]` (see B-Step 5).
 
-   **Opt-in PAID (if env set):**
-   - **codex-exec** if `OPENAI_API_KEY` set OR `which codex` succeeds:
-     ```bash
-     codex exec --json --sandbox read-only --ask-for-approval never \
-       --output-last-message "/tmp/codex-review-<id>-iter<n>.md" \
-       "$(cat <prompt-template-with-spec-path>)"
-     ```
-   - **cursor-cloud-agent** if `CURSOR_API_KEY` set:
-     ```bash
-     RUN=$(curl -sX POST https://api.cursor.com/v1/agents \
-       -H "Authorization: Bearer $CURSOR_API_KEY" \
-       -H "Content-Type: application/json" \
-       -d "{\"prompt\":{\"text\":\"<prompt+spec>\"},\"repos\":[{\"url\":\"<repo-url>\"}],\"model\":{\"id\":\"composer-2.5\"},\"autoCreatePR\":false}")
-     # Poll run.id every 5s up to 120s
-     ```
-     If timeout → record `{kind: "cursor-cloud-agent", status: "pending", runId: "<id>", timeoutAt: "<iso>"}` in `reviewers[]`. Re-run `/review-spec` folds in pending result idempotently.
+### B-Steps (bootstrap-specific)
 
-3. **Composer 2.5 manual prompt** (always — FREE fallback for Cursor Free users):
+1. **No claim file commits.** No subStatus transitions. No git operations on the claim file. The bootstrap mode is read-only with respect to git.
 
-   Print to chat:
+2. **Step 1.5 — print initial status table.** See `Step 1.5` in normal mode "Steps (normal mode)". Same format. Skip the "iter <n>" annotation (bootstrap has no iter tracking).
+
+3. **Dispatch reviewers** identically to normal mode Step 2 (see below). Use the bootstrap `<path>` as the `<path>` placeholder in adapter prompts.
+
+4. **Composer 2.5 prompt** — print to chat per "Step 3" in normal mode. Same format. Path is the bootstrap argument.
+
+5. **Aggregate findings.** Same logic as normal mode Step 4, BUT the result is printed to chat ONLY. No claim file write (none exists). No `reviewers[]` JSON array persisted. Output structure (same Step 4 final-table format from normal mode):
    ```
-   🔵 OPTIONAL: open Cursor Composer 2.5 (Cmd+I) and paste this prompt:
+   ✅ Bootstrap review complete for <path> in <wall-clock-time>s.
 
-   Review spec at `<path>` for: internal contradictions, missing edge cases / failure modes,
-   scope creep vs declared scope_in/scope_out, alignment with CLAUDE.md + DESIGN.md, test coverage gaps.
-   Return findings as P0/P1/P2 with confidence ratings (5/10–10/10).
+   | Reviewer | Status | Findings (P0/P1/P2) | Time |
+   |---|---|---|---|
+   | feature-dev:code-reviewer | ✅ complete | N/M/K | <s>s |
+   | general-purpose adversarial | ✅ complete | N/M (no P2) | <s>s |
+   | codex-exec | <✅/⏭/❌> | <findings or N/A> | <time or N/A> |
+   | cursor-cloud-agent | <✅/⏭/❌ + reason> | <findings or N/A> | <time or N/A> |
+   | composer-2.5 manual | 📋 prompt printed; optional paste-back | N/A | N/A |
 
-   Then paste Composer's reply back into this chat. Re-run /pr-autopilot:review-spec to fold it in.
-   (Advisory only — does NOT block spec_review_complete transition.)
+   Aggregate: P0 X, P1 Y, P2 Z.
    ```
 
-4. **Aggregate findings** from all sync adapters that completed. Increment `reviewIteration`. Append entries to `reviewers[]` in claim file:
-   ```json
-   {
-     "kind": "claude-code-reviewer-subagent" | "claude-self-review" | "codex-exec" | "cursor-cloud-agent" | "composer-2.5-manual",
-     "status": "complete" | "pending" | "timeout",
-     "iteration": <n>,
-     "findings": { "p0": N, "p1": M, "p2": K, "details": "..." },
-     "completedAt": "<iso>"
-   }
+   If `P0 > 0`: also print aggregated P0 list grouped by reviewer (same format as normal mode).
+   If `P0 == 0`: print `✅ No P0 findings. Spec ready for next step (Marcin approval, then implementation).`
+
+6. **Audit signal.** Write a memory to ExoVault via `mcp__exo-vault__write_memory` (memoryType: `episodic`):
    ```
-
-5. **Composer manual paste handling (P1-4 fix):** if conversation context contains pasted reply since last `/review-spec`, parse it, dedup by body hash (do not duplicate entries), append as `composer-2.5-manual`. Advisory only — re-aggregation may flip state if new P0.
-
-6. **Decision based on aggregated P0 count:**
-   - **0 P0** → `subStatus: spec_review_complete`. Echo:
-     ```
-     ✅ Spec review complete (iter <n>). Findings: <N> P1, <K> P2 (no P0).
-     📋 Reviewers: <list>
-
-     Marcin: when ready, run /pr-autopilot:approve-spec.
-     (Optional: paste Composer 2.5 findings + re-run /review-spec for additional perspective.)
-     ```
-   - **≥1 P0** → `subStatus: spec_revising`. Echo aggregated P0 list grouped by reviewer:
-     ```
-     ⚠️ Spec revision needed (iter <n>). <N> P0 findings:
-
-     [P0 from codex-exec, confidence 8/10] <title> — <body>
-     ...
-
-     Agent: address findings, re-run /pr-autopilot:review-spec.
-     ```
-
-7. **Commit claim file update:**
-   ```bash
-   git add .claude/assignment-claims/<id>.json
-   git commit -m "chore(pr-autopilot): review-spec iter <n> for <id> — <N> P0, <M> P1"
+   Bootstrap review of <abs-path> at <iso-timestamp>; reviewers <list>; result: <N>P0/<M>P1/<K>P2.
    ```
+   If `--force` was used (enforcement guard skipped), prepend the literal token `[BOOTSTRAP_FORCE]` to the content. Why: auditable trail of when bootstrap mode was used + when override was forced. Reviewer-bot or future audit can grep this from vault.
+
+7. **Exit clean.** No further steps. Re-running with same path is idempotent — same dedup behavior as normal mode (Composer manual paste-back parsed from conversation context, body-hash dedup).
+
+## Steps (normal mode)
+
+### Step 1 — read claim file + start
+
+Read `.claude/assignment-claims/<id>.json`. Update `subStatus: spec_review_requested`. Increment `reviewIteration` if existing, else set to 1. Commit:
+```bash
+git add .claude/assignment-claims/<id>.json
+git commit -m "chore(pr-autopilot): review-spec start for <id> (iter <n>)"
+```
+
+### Step 1.5 — print initial status table (v0.5.1, Gap D.1)
+
+Before any dispatch, print to chat:
+
+```markdown
+🔄 **Reviewing spec at `<absolute-path>` (iter <n>)** ...
+
+Dispatching reviewers:
+
+| Reviewer | Type | Status |
+|---|---|---|
+| feature-dev:code-reviewer | Claude subagent (FREE, always) | ⏳ pending |
+| general-purpose adversarial | Claude subagent (FREE, hostile) | ⏳ pending |
+| codex-exec | <if env+CLI set: ⏳ pending; else: ⏭ skipped (no OPENAI_API_KEY / codex)> |
+| cursor-cloud-agent | <after probe: ⏳ pending (Pro) OR ⏭ skipped (Free/invalid/network)> |
+| composer-2.5 manual | FREE paste-back | 📋 prompt will print below |
+```
+
+Then write TodoWrite with one item per reviewer-channel that is `⏳ pending`:
+```typescript
+TodoWrite([
+  { content: "review-spec — feature-dev:code-reviewer subagent",
+    activeForm: "Running code-reviewer subagent (iter <n>)",
+    status: "in_progress" },
+  { content: "review-spec — general-purpose adversarial subagent",
+    activeForm: "Running adversarial subagent (iter <n>)",
+    status: "in_progress" },
+  // codex-exec / cursor-cloud-agent items added conditionally based on env+probe
+  // composer-2.5 manual: NOT added to TodoWrite (user-driven, no agent dispatch)
+])
+```
+
+This gives the user immediate visibility into what's running before the parallel dispatch starts. v0.5.1 limitation: status will atomically flip from ⏳ pending → final state at Step 4 (since subagent dispatch via Agent tool is foreground/blocking). TRUE incremental updates are v0.6+ (Gap D.2).
+
+### Step 2 — dispatch sync adapters in parallel
+
+For cursor-cloud-agent, run the **probe FIRST** to determine plan eligibility:
+```bash
+bash "$CLAUDE_PLUGIN_ROOT/hooks/cursor-cloud-agent-probe.sh"
+PROBE_EXIT=$?
+```
+
+Based on `PROBE_EXIT`:
+- **0** → Cursor Pro available. Will dispatch cursor-cloud-agent below.
+- **42** → Cursor Free (plan_required). Skip cursor-cloud-agent. Append to `reviewers[]`: `{kind:"cursor-cloud-agent", status:"skipped", reason:"plan_required", iteration:<n>}`. Echo: `ℹ️ Cursor Cloud Agent skipped — requires Cursor Pro. Upgrade: https://cursor.com/settings/billing.`
+- **43** → API key invalid or missing. Skip with louder warning. Append `reason:"invalid_key"`. Echo: `⚠️ Cursor Cloud Agent skipped — API key invalid or missing. Check ~/.claude/settings.json env.CURSOR_API_KEY.`
+- **44** → Network / parse / other error. Skip with retry hint. Append `reason:"probe_error"`. Echo: `ℹ️ Cursor Cloud Agent probe failed (network/parse). Probe re-runs on next /review-spec invocation; no caching.`
+
+Now dispatch all enabled adapters in parallel via a single Agent-tool-call message containing multiple invocations:
+
+**Always (FREE):**
+- **claude-code-reviewer-subagent**: `Agent({ subagent_type: 'feature-dev:code-reviewer', description: 'Pre-PR spec review', prompt: <see "Adapter prompts" below, with <path> = claimFile.specFile or bootstrap argument> })`
+- **claude-self-review** (hostile, FREE): `Agent({ subagent_type: 'general-purpose', description: 'Adversarial spec review', prompt: <hostile template, same path substitution> })`
+
+**Opt-in PAID (if env set):**
+- **codex-exec** if `OPENAI_API_KEY` set OR `which codex` succeeds:
+  ```bash
+  codex exec --json --sandbox read-only --ask-for-approval never \
+    --output-last-message "/tmp/codex-review-<id>-iter<n>.md" \
+    "$(cat <prompt-template-with-spec-path>)"
+  ```
+- **cursor-cloud-agent** (ONLY if probe returned 0):
+  ```bash
+  RUN=$(curl -sX POST https://api.cursor.com/v1/agents \
+    -H "Authorization: Bearer $CURSOR_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"prompt\":{\"text\":\"<prompt+spec>\"},\"repos\":[{\"url\":\"<repo-url>\"}],\"model\":{\"id\":\"composer-2.5\"},\"autoCreatePR\":false}")
+  # Poll run.id every 5s up to 120s
+  ```
+  If timeout → record `{kind: "cursor-cloud-agent", status: "pending", runId: "<id>", timeoutAt: "<iso>"}` in `reviewers[]`. Re-run `/review-spec` folds in pending result idempotently.
+
+**Note on URL contract:** the dispatch always uses production `https://api.cursor.com/v1/agents`. There is NO env-var override on dispatch. The probe accepts `CURSOR_API_URL` override ONLY when `PR_AUTOPILOT_TEST_MODE=1` is also set (test-mode-only path). This asymmetry is intentional: tests validate probe LOGIC; dispatch is exercised by live EVAL 43 (real Pro plan).
+
+### Step 3 — Composer 2.5 manual prompt (always — FREE fallback)
+
+Print to chat:
+
+```markdown
+🔵 **OPTIONAL: Composer 2.5 review** — for a 3rd perspective beyond the 2 Claude subagents, copy the block below, open Cursor (Cmd+I), paste, run, paste reply back into Claude.
+```
+
+Then immediately print a single triple-backtick fenced code block. The block content must have the spec path **baked in at skill runtime** (no `<path>` placeholder for user to edit):
+
+````
+```
+Review the spec at <ABSOLUTE-PATH-RESOLVED-AT-SKILL-RUNTIME> for:
+- internal contradictions
+- missing edge cases / failure modes
+- scope creep vs declared scope_in/scope_out
+- alignment with CLAUDE.md + DESIGN.md (read both first)
+- test coverage gaps
+- security/correctness for code paths described
+
+Return P0/P1/P2 findings with confidence ratings (5/10-10/10) per PUSHBACK.md.
+Format: structured markdown table or per-finding section.
+```
+````
+
+After Composer responds: user pastes its reply back into this Claude chat, then re-runs `/pr-autopilot:review-spec` (or `--bootstrap` with same path). Findings auto-dedup by body hash.
+
+(Advisory only — does NOT block `spec_review_complete` transition.)
+
+### Step 4 — aggregate findings + print final status table
+
+Aggregate findings from all sync adapters that completed. Increment `reviewIteration` if not already done in Step 1. Append entries to `reviewers[]` in claim file:
+```json
+{
+  "kind": "claude-code-reviewer-subagent" | "claude-self-review" | "codex-exec" | "cursor-cloud-agent" | "composer-2.5-manual",
+  "status": "complete" | "pending" | "timeout" | "skipped",
+  "iteration": <n>,
+  "findings": { "p0": N, "p1": M, "p2": K, "details": "..." },
+  "completedAt": "<iso>",
+  "skipReason": "plan_required" | "invalid_key" | "probe_error" | "no_env"  // only if status: skipped
+}
+```
+
+**Print final status table to chat (v0.5.1, Gap D.1):**
+
+```markdown
+✅ **Review iter <n> complete in <wall-clock-time>s.**
+
+| Reviewer | Status | Findings (P0/P1/P2) | Time |
+|---|---|---|---|
+| feature-dev:code-reviewer | ✅ complete | N/M/K | <s>s |
+| general-purpose adversarial | ✅ complete | N/M (no P2 — hostile P0/P1 only) | <s>s |
+| codex-exec | <✅ complete OR ⏭ skipped (reason) OR ❌ failed> | <findings or N/A> | <s or N/A> |
+| cursor-cloud-agent | <✅ complete OR ⏭ skipped (reason) OR ❌ failed> | <findings or N/A> | <s or N/A> |
+| composer-2.5 manual | <📋 prompt printed (no paste-back yet) OR ✅ folded in> | <findings or N/A> | N/A |
+
+**Aggregate: P0 X, P1 Y, P2 Z** → <decision: spec_review_complete OR spec_revising>
+```
+
+**Update TodoWrite to mark each reviewer-channel `completed`:**
+```typescript
+// Update the items added in Step 1.5 to status: completed
+TodoWrite([
+  { content: "review-spec — feature-dev:code-reviewer subagent",
+    activeForm: "code-reviewer subagent: N P0, M P1, K P2",
+    status: "completed" },
+  // ... same for each item
+])
+```
+
+Skipped channels: keep the item with `status: completed` but use `activeForm: "Skipped: <reason>"` to indicate the skip vs run distinction.
+
+### Step 5 — Composer manual paste handling
+
+If conversation context contains a pasted Composer reply since the last `/review-spec` invocation, parse it, dedup by body hash (do not duplicate entries), append as `{kind: "composer-2.5-manual", status: "complete", iteration: <n>, ...}`. Advisory only — re-aggregation may flip state if new P0 surfaces.
+
+### Step 6 — decision based on aggregated P0 count
+
+- **0 P0** → `subStatus: spec_review_complete`. Echo (after the final status table from Step 4):
+  ```
+  📋 Spec ready for next step.
+
+  Marcin: when ready, run /pr-autopilot:approve-spec.
+  (Optional: paste Composer 2.5 findings + re-run /review-spec for additional perspective.)
+  ```
+
+- **≥1 P0** → `subStatus: spec_revising`. Echo aggregated P0 list grouped by reviewer (after the final status table):
+  ```
+  ⚠️ Spec revision needed. <N> P0 findings:
+
+  [P0 from <reviewer-kind>, confidence 8/10] <title> — <body>
+  ...
+
+  Agent: address findings, re-run /pr-autopilot:review-spec.
+  ```
+
+### Step 7 — commit claim file update
+
+```bash
+git add .claude/assignment-claims/<id>.json
+git commit -m "chore(pr-autopilot): review-spec iter <n> for <id> — <N> P0, <M> P1"
+```
 
 ## Adapter prompts (PUSHBACK.md rubric)
 
-**claude-code-reviewer-subagent:**
+**claude-code-reviewer-subagent prompt template:**
 ```
 Review the spec at <path> for engineering rigor:
 - internal contradictions
@@ -114,7 +312,7 @@ Return P0/P1/P2 findings with confidence ratings (5/10-10/10) per PUSHBACK.md ru
 Format: structured markdown table or per-finding section.
 ```
 
-**claude-self-review (hostile):**
+**claude-self-review (hostile) prompt template:**
 ```
 You are a HOSTILE reviewer reading the spec at <path>. Find WEAKNESSES:
 - what is underspecified / hand-wavy
@@ -131,6 +329,8 @@ Return P0/P1 ONLY (no P2 noise) with confidence ratings.
 
 ## Idempotency
 
-- Re-running `/review-spec` after `spec_review_complete` is safe — it re-dispatches reviewers and may flip back to `spec_revising` if new P0 appear.
+- **Normal mode:** re-running `/review-spec` after `spec_review_complete` is safe — it re-dispatches reviewers and may flip back to `spec_revising` if new P0 appear.
+- **Bootstrap mode:** re-running with same path is safe — prints fresh status tables + aggregated findings to chat. No state persistence between runs (no claim file).
 - Pending Cursor Cloud Agent runs get re-polled on re-run.
-- Manual Composer paste dedup'd by body hash.
+- Manual Composer paste dedup'd by body hash across iterations.
+- TodoWrite items from a previous run are overwritten by Step 1.5's fresh TodoWrite call (idempotent re-render).

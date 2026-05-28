@@ -108,7 +108,7 @@ These cover the new `/assign`, `/review-spec`, `/approve-spec`, `/pr-opened`, `/
 | 46 | **`/finish` PR not merged** | `gh pr view <PR#> --json mergedAt` returns null | reject: "PR #<N> is not merged (state: <state>). `/finish` requires a merged PR." |
 | 47 | **Abandoned worktree recovery** | previous session crashed after `git worktree add` but before claim file commit | `/assign` detects existing worktree without claim file → echo "Orphan worktree at `<path>` without claim file. Run `/pr-autopilot:unassign <id>` to clean up, then retry."; does not clobber |
 
-47 test cases now (1–19 + 20a + 20b + 21 + 22–38 + 39–47, with 17 renamed 17Y) + 1 pre-flight step. 8 v0.1 gating (1, 4, 8, 11, 17Y, 22, 23, 24) + auto-trigger 25–30 (v0.3) + auto-merge 31–38 (v0.4) + pre-PR lifecycle 39–47 (v0.5).
+47 test cases at v0.5; +7 added in v0.5.1 → 54 total. 8 v0.1 gating (1, 4, 8, 11, 17Y, 22, 23, 24) + auto-trigger 25–30 (v0.3) + auto-merge 31–38 (v0.4) + pre-PR lifecycle 39–47 (v0.5) + review-spec improvements 48–50 + variants (v0.5.1).
 
 **v0.5 gating subset for v1.0.0** (must pass on a real assignment in MarcinSufa/asistel or MarcinSufa/exo-vault):
 - 39 (graceful error)
@@ -116,6 +116,34 @@ These cover the new `/assign`, `/review-spec`, `/approve-spec`, `/pr-opened`, `/
 - 42 (no env keys path — free-only flow)
 - 44 (approve gate enforcement)
 - 47 (recovery)
+
+### v0.5.1 — Review-spec improvements (scenarios 48–50 + variants)
+
+These cover `--bootstrap` mode, the cursor-cloud-agent plan probe, the Composer UX polish, and the dispatch/aggregate status tables (Gap D.1).
+
+| # | Scenario | Trigger | Expected |
+|---|---|---|---|
+| 48 | **`/review-spec --bootstrap` happy path** | synthetic spec at `/tmp/test-bootstrap-spec.md`; current repo has NO `assignments.yaml` OR has it but no claim files | 2 Claude subagents dispatch; no claim file commits; status table printed at dispatch + final aggregated table at completion; findings printed to chat; ExoVault episodic memory written: `Bootstrap review of <abs-path> at <iso>; reviewers <list>; result: NP0/MP1/KP2`. |
+| 48-NEG-A | **`--bootstrap` nonexistent path** | `/pr-autopilot:review-spec --bootstrap /nonexistent/path.md` | refuse: `[pr-autopilot/review-spec] --bootstrap path not found: /nonexistent/path.md.` No dispatch. |
+| 48-NEG-B | **`--bootstrap` no path argument** | `/pr-autopilot:review-spec --bootstrap` (no following token) | refuse: `[pr-autopilot/review-spec] --bootstrap requires a path argument; got none.` |
+| 48-NEG-C | **`--bootstrap` in repo with active assignments** | repo has `assignments.yaml` AND `.claude/assignment-claims/<id>.json`; `--bootstrap <path>` without `--force` | refuse with enforcement-guard message instructing to use `/assign` + `/review-spec`. With `--force`: dispatch proceeds; ExoVault audit memory includes `[BOOTSTRAP_FORCE]` token. |
+| 49 | **Composer UX — fenced block + baked path** | normal-mode `/review-spec` on a test spec | echoed Composer prompt is single triple-backtick fenced block; path concrete (no `<path>`); prose outside the block. Manual eyeball test. |
+| 50 | **cursor-cloud-agent probe — Free 403 graceful skip** | on Cursor Free, `/review-spec` (any mode) with `CURSOR_API_KEY` set | probe exit 42; skill logs `ℹ️ Cursor Cloud Agent skipped — requires Cursor Pro.`; `reviewers[]` entry `{kind:"cursor-cloud-agent",status:"skipped",reason:"plan_required"}`; status table shows `⏭ skipped (plan_required)`. |
+| 50-NEG | **cursor-cloud-agent probe — network failure** | `PR_AUTOPILOT_TEST_MODE=1 CURSOR_API_URL=http://127.0.0.1:1/agents`; `/review-spec` | probe exit 44; skill logs `ℹ️ Cursor Cloud Agent probe failed (network/parse).`; NO caching: re-invocation re-fires probe. |
+| 48b | **Dogfood — bootstrap-review the Asistel onboarding spec** (Marcin-local bonus, NOT v1.0.0 gating) | `/pr-autopilot:review-spec --bootstrap c:\Users\sufam\IdeaProjects\ai phone assistent\.claude\worktrees\feat-pr-autopilot-v0.5-onboard\specs\2026-05-28-pr-autopilot-v0.5-onboarding.md` | Same outcome as 48 on a real spec. Validates the v0.5.1 dogfood loop closes (spec that discovered the gap reviewed by the fix). Marcin-local; NOT reproducible in CI. |
+
+**v0.5.1 gating subset for "field-validated"** (extends v0.5.0 gating; does not replace):
+- 48 (happy path)
+- 48-NEG-A (nonexistent path refusal)
+- 48-NEG-B (no path arg refusal)
+- 48-NEG-C (enforcement guard + `--force` override)
+- 49 (Composer UX fenced block)
+- 50 (Cursor probe 403 skip)
+- 50-NEG (Cursor probe network failure)
+
+**v0.5.1 inheritance rule:** cannot claim "field-validated" until v0.5.0 gating subset (39/41/42/44/47) ALSO passes on a real assignment. Full v1.0.0 gating subset = union of v0.5.0 + v0.5.1.
+
+48b is Marcin-local dogfood; passes are advisory; cannot count toward v1.0.0 gating (machine-specific path).
 
 ---
 

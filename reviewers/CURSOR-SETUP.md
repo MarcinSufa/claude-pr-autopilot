@@ -2,6 +2,21 @@
 
 The `cursor` reviewer adapter is the default and recommended primary reviewer for `/pr-autopilot`. It uses Cursor's GitHub App to auto-review every push.
 
+## Plan requirements (v0.5.1)
+
+There are **two distinct Cursor integration paths** with different plan requirements:
+
+| Path | Cursor plan | API key | Used by |
+|---|---|---|---|
+| **PR review via Background Agent** (this doc, the v0.1+ flow) | Free or Pro | none | `/pr-autopilot:step` loop in `skills/step/` |
+| **Pre-PR `cursor-cloud-agent` (composer-2.5 spec review)** | **Pro / Business required** | `CURSOR_API_KEY` | `/pr-autopilot:review-spec` in `skills/review-spec/` |
+
+If you're on Cursor Free:
+- The Background Agent PR-review path (this doc) still works.
+- The `cursor-cloud-agent` dispatch in `/pr-autopilot:review-spec` returns HTTP 403 `plan_required`. v0.5.1's `hooks/cursor-cloud-agent-probe.sh` pre-flight catches this and gracefully skips the channel — `/review-spec` continues with the 2 free Claude subagents + the manual Composer 2.5 paste-back prompt. No action needed beyond noting the `ℹ️ Cursor Cloud Agent skipped` message.
+
+To enable the API path: upgrade at https://cursor.com/settings/billing, then set `CURSOR_API_KEY` in `~/.claude/settings.json` `env` block (or via `setx` / your shell profile). Restart Claude Code to propagate. EVAL scenario 50 validates the Free→graceful-skip path; EVAL scenario 43 validates the Pro→full-dispatch path.
+
 ## Requirements
 
 - **Cursor Pro plan** ($20/mo) — Background Agents are not available on the free plan

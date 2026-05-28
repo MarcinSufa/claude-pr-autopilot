@@ -24,8 +24,21 @@ blocklist), CI-gated, queued-vs-merged handled by a merge-wait short-circuit (st
 squash when a repo lacks GitHub auto-merge. Never auto-invokes `/land-and-deploy` (notify + recommend only).
 Spec: docs/superpowers/specs/2026-05-24-pr-autopilot-v0.4-auto-merge-design.md.
 
-## v0.5 / Future — Cursor-native runtime adapter (Path C)
+## v0.5 — Pre-PR lifecycle (current)
+Adds the **complete pre-PR layer** on top of v0.4's post-PR loop. Atomic assignment claim
+via `git worktree add -b origin/main` (filesystem-atomic via git refs), spec drafting,
+multi-channel pre-PR review (2 free Claude subagents always; codex-exec + cursor-cloud-agent
+opt-in via env keys; composer-2.5 manual paste-back fallback), AskUserQuestion-gated TDD
+approval enforced by a PreToolUse hook (`enforce-spec-gate.sh`), SessionStart safety net
+that prevents stale-main planning waste, post-merge cleanup with `assignments.yaml` truth
+on `main` only. Five new skills (`assign`, `review-spec`, `approve-spec`, `pr-opened`,
+`finish`) + one housekeeping skill (`unassign`) + two hooks + four templates. Backward
+compat: v0.4 skills (`allow`, `automerge`, `pause`, `resume`, `step`) unchanged.
+Spec: `docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5-pre-pr-lifecycle-design.md`.
+
+## v0.6 / Future — Cursor-native runtime adapter (Path C)
 Port the loop layer to Cursor primitives. Algorithm unchanged; only the loop driver moves.
+(Previously tentatively numbered v0.5; pushed to v0.6 to make room for pre-PR lifecycle.)
 
 ## v1.0.0 (stability gate)
 

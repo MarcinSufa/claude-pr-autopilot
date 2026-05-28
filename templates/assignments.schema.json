@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MarcinSufa/claude-pr-autopilot/blob/main/templates/assignments.schema.json",
+  "title": "pr-autopilot v0.5 assignments.yaml",
+  "description": "Schema for assignments.yaml — the project-level work queue consumed by /pr-autopilot:assign, /finish, etc. See docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5-pre-pr-lifecycle-design.md for full reference.",
+  "type": "object",
+  "required": ["version", "assignments"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "Schema version. v0.5 ships with version: 1."
+    },
+    "excludes": {
+      "type": "array",
+      "description": "Already-shipped assignments — context only. Used for dep satisfaction by /assign.",
+      "items": {
+        "type": "object",
+        "required": ["id", "pr", "merged_at"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "pr": { "type": "integer", "minimum": 1 },
+          "merged_at": { "type": "string", "format": "date" }
+        }
+      }
+    },
+    "assignments": {
+      "type": "array",
+      "description": "In-flight + future assignments.",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "branch", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+            "description": "Globally unique within project. Lowercase kebab-case. Recommended <area>-<seq>-<topic>."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Human-readable title."
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(feat|fix|chore|docs|refactor|perf|test|build|ci)\\/.+$",
+            "description": "Full git branch ref. Conventional prefixes recommended."
+          },
+          "status": {
+            "enum": ["todo", "merged", "blocked"],
+            "description": "Coarse status on main. Runtime sub-status lives in .claude/assignment-claims/<id>.json on the feature branch — NEVER 'in_progress' here."
+          },
+          "deps": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": [],
+            "description": "Other assignment IDs that must have status: merged before this is READY."
+          },
+          "blocks": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": [],
+            "description": "Informational reverse pointer — assignments that wait on this one. NOT validated by skill."
+          },
+          "effort": {
+            "type": "string",
+            "description": "Human estimate, free-form. Examples: '0.5-1d', '2-3d'."
+          },
+          "needs_decision": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true: status should be 'blocked' until user resolves. No auto-unblock skill in v0.5."
+          },
+          "files_touched": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "scope_in": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "scope_out": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "acceptance": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "first_prompt": {
+            "type": "string",
+            "description": "Multi-line kickoff prompt loaded by /assign after worktree creation."
+          },
+          "merged_at": {
+            "type": "string",
+            "format": "date",
+            "description": "Set by /finish when status flips to merged."
+          },
+          "merged_in_pr": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Set by /finish when status flips to merged."
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "status": { "const": "merged" } } },
+            "then": { "required": ["merged_at", "merged_in_pr"] }
+          }
+        ]
+      }
+    }
+  }
+}

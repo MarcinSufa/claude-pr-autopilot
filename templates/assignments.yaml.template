@@ -1,0 +1,67 @@
+# pr-autopilot v0.5 — assignments.yaml
+# Project-level work queue. Copy this template to <project>/assignments.yaml and customize.
+# See https://github.com/MarcinSufa/claude-pr-autopilot/blob/main/docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5-pre-pr-lifecycle-design.md
+# for the full schema reference.
+
+version: 1
+
+# Already-shipped assignments — context only. Used by /pr-autopilot:assign to compute
+# dep satisfaction. Add an entry here when a major slice ships outside the v0.5 workflow.
+excludes: []
+#   - id: initial-shell-port
+#     pr: 21
+#     merged_at: 2026-05-28
+
+# In-flight + future assignments. status may be: todo | merged | blocked
+# (NOT 'in_progress' on main — runtime state lives in .claude/assignment-claims/<id>.json on the feature branch.)
+assignments:
+  - id: example-locations-polish               # globally unique within this project; <area>-<seq>-<topic> recommended
+    title: "Polish /admin/locations per design v2"
+    branch: feat/admin/locations-polish        # full git branch ref
+    status: todo                                # todo | merged | blocked
+    deps: []                                    # other assignment IDs that must be in `excludes` (merged) or have status: merged
+    blocks:                                     # informational reverse pointer (NOT validated by skill)
+      - example-future-d2-agents
+    effort: "0.5-1d"                           # human estimate, free-form
+    needs_decision: false                       # if true: status should be 'blocked' until user resolves (no auto-unblock skill in v0.5)
+    files_touched:
+      - src/app/admin/locations/page.tsx
+      - src/app/admin/locations/[id]/page.tsx
+      - src/app/admin/locations/new/page.tsx
+    scope_in:
+      - "PageHeader (eyebrow MetaMono + h1 + actions)"
+      - "DataTable or chips for status column"
+      - "sage hover border, paper-grain background"
+    scope_out:
+      - "DB schema changes"
+      - "Filter/search (separate assignment)"
+      - "Pagination, bulk actions"
+    acceptance:
+      - "Screenshot before/after manual review by user"
+      - "Render tests for main components"
+      - "npm run build + lint + test all green"
+      - "Codex review passes (auto-fired by /review-spec)"
+      - "User approves via /pr-autopilot:approve-spec and merges PR"
+    first_prompt: |
+      Cel: implement assignment example-locations-polish from assignments.yaml.
+
+      Krok 1: read CLAUDE.md + DESIGN.md (project-specific guidelines).
+      Krok 2: write a spec at specs/<YYYY-MM-DD>-example-locations-polish.md.
+              The spec should cover: problem statement, scope_in/out, files touched, acceptance criteria,
+              before-screenshot, test plan.
+      Krok 3: run /pr-autopilot:review-spec to dispatch reviewers (2 Claude subagents always;
+              codex-exec + cursor-cloud-agent if env keys set; composer-2.5 manual prompt).
+      Krok 4: address any P0 findings; re-run /review-spec until 0 P0.
+      Krok 5: wait for /pr-autopilot:approve-spec from Marcin (AskUserQuestion gate).
+      Krok 6: TDD red → green → refactor. Per CLAUDE.md rule #4.
+      Krok 7: gh pr create. Then /pr-autopilot:pr-opened <PR#>.
+      Krok 8: /loop /pr-autopilot:step <PR#> to run the v0.4 review loop.
+      Krok 9: After merge, /pr-autopilot:finish example-locations-polish.
+
+  # Add more assignments below following the same shape.
+  # - id: example-future-d2-agents
+  #   title: "..."
+  #   branch: feat/admin/agents-polish
+  #   status: todo
+  #   deps: [example-locations-polish]
+  #   ...

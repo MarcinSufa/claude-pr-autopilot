@@ -1,7 +1,7 @@
 {
   "name": "pr-autopilot",
-  "version": "0.4.0",
-  "description": "Automated PR review loop: enabled reviewers review (Cursor by default), Claude fixes, iterate until merge-ready. Open PR, walk away, come back when it's 5/5.",
+  "version": "0.5.0",
+  "description": "Complete multi-agent dev pipeline. v0.5 adds the pre-PR lifecycle (atomic assignment claim, spec drafting, multi-channel pre-PR review, user-approved TDD gate) on top of v0.4's post-PR review loop. Pick an assignment, walk away, come back when it's merged.",
   "author": {
     "name": "Marcin Sufa",
     "email": "sufa.marcin@gmail.com"
@@ -15,8 +15,14 @@
     "code-review",
     "cursor",
     "copilot",
+    "codex",
+    "composer",
     "automation",
     "claude-code",
-    "loop"
+    "loop",
+    "multi-agent",
+    "spec-driven",
+    "tdd-gate",
+    "worktree"
   ]
 }

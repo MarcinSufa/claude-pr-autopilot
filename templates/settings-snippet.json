@@ -1,0 +1,42 @@
+{
+  "_comment_1": "pr-autopilot v0.5 — settings snippet to merge into your project's .claude/settings.json",
+  "_comment_2": "Replace <version> with the installed pr-autopilot version (e.g. 0.5.0).",
+  "_comment_3": "Replace <your-vault-uuid> with your ExoVault vault id from https://exovault.co.",
+  "_comment_4": "DO NOT keep the _comment_* keys — they are documentation only. Strip them when merging.",
+  "_comment_5": "If your project already has hooks defined, merge into the existing 'hooks' object; do not overwrite.",
+
+  "env": {
+    "EXOVAULT_VAULT_ID": "<your-vault-uuid>",
+    "_comment_env": "Required by /pr-autopilot:assign and /finish for ExoVault task mirror. The MCP server picks this up automatically."
+  },
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/cache/claude-pr-autopilot/pr-autopilot/<version>}/hooks/check-origin-main.sh",
+            "timeout": 8,
+            "_comment": "Always-on safety net. Reports if local main or feature-branch base is stale vs origin/main. Does NOT honor allowlist or pause — runs in every session."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/cache/claude-pr-autopilot/pr-autopilot/<version>}/hooks/enforce-spec-gate.sh",
+            "timeout": 4,
+            "_comment_a": "Hard gate: blocks Write/Edit outside specs/ unless claim file shows subStatus=implementing|pr_*. Honors pause sentinel + allowlist."
+          }
+        ]
+      }
+    ]
+  },
+
+  "_comment_setup": "After merging this into your .claude/settings.json: (1) strip all _comment_* keys, (2) run /pr-autopilot:allow <owner/repo> to enable the autopilot allowlist, (3) optionally set OPENAI_API_KEY (for codex-exec) and CURSOR_API_KEY (for cursor-cloud-agent) in your shell env or in the env block above."
+}

@@ -92,7 +92,30 @@ gh pr view <PR#> --json reviews --jq '.reviews[].author.login' | sort -u
 | 37 | **Direct-merge fallback** | opt-in repo, base dev, repo does NOT have GitHub auto-merge enabled | `gh pr merge --auto` errors → fall back to direct `gh pr merge --squash --delete-branch` (**synchronous**; CI + reviews already green). On success → **delete state + notify "merged"** (NOT "queued", `autoMergeQueued` stays false, no wait tick). If the direct merge is refused (e.g. branch protection) → notify "blocked" + STOP |
 | 38 | **Blocked-merge state cleanup** | merge-wait hits `mergeStateStatus` DIRTY (or stuck past `pollTickCap`) | step 0.6 STOPs **keeping** state; verify documented recovery — resolve PR + re-run `/pr-autopilot:step <N>`, OR delete `~/.pr-autopilot/<owner>-<repo>-<N>.json` — clears the zombie state |
 
-39 test cases (1-19 + 20a + 20b + 21 + 22-38, with 17 renamed 17Y) + 1 pre-flight step. 8 gating (1, 4, 8, 11, 17Y, 22, 23, 24); auto-trigger scenarios 25-30 added in v0.3; auto-merge scenarios 31-38 added in v0.4 (31/33/34/36 cover the happy queue→merge lifecycle; 32/35 the safety gates; 37/38 fallback + recovery).
+### v0.5 — Pre-PR lifecycle (scenarios 39–47)
+
+These cover the new `/assign`, `/review-spec`, `/approve-spec`, `/pr-opened`, `/finish`, `/unassign` skills + the SessionStart and PreToolUse hooks introduced in v0.5.
+
+| # | Scenario | Trigger | Expected |
+|---|---|---|---|
+| 39 | **`/assign` non-existent id** | `assignments.yaml` lacks the given id | graceful error: "Assignment `<id>` not found in assignments.yaml. Available: [list]." |
+| 40 | **deps not all merged** | id has a dep that is `status: todo` or in-flight | reject: "Assignment `<id>` is blocked by unmerged deps: [list]. Cannot claim until they merge." |
+| 41 | **claim race** | two agents call `/assign <id>` within 100ms | git branch creation fails for loser → loser reads `git show <branch>:.claude/assignment-claims/<id>.json \| jq '{agentId, claimedAt, subStatus}'` and surfaces "claimed by `<agentId>` since `<claimedAt>`, current state `<subStatus>`" |
+| 42 | **`/review-spec` no env keys** | neither `OPENAI_API_KEY` nor `CURSOR_API_KEY` set; no `codex` on PATH | 2 Claude subagents fire + manual Composer prompt printed; aggregation completes; `subStatus` flips per P0 count |
+| 43 | **`/review-spec` all keys set** | both env keys set | 2 Claude subagents + codex-exec + cursor-cloud-agent fire in parallel; manual prompt still printed; aggregation includes all 4 auto channels |
+| 44 | **`/approve-spec` without prior `/review-spec`** | claim file `subStatus` is `spec_drafting` (never reviewed) | reject with message instructing to run `/review-spec` first; no AskUserQuestion |
+| 45 | **SessionStart hook offline** | `git fetch origin main` times out (8s) | graceful skip with message `"could not fetch origin/main (offline or slow); skipping."`; exit 0; never blocks session |
+| 46 | **`/finish` PR not merged** | `gh pr view <PR#> --json mergedAt` returns null | reject: "PR #<N> is not merged (state: <state>). `/finish` requires a merged PR." |
+| 47 | **Abandoned worktree recovery** | previous session crashed after `git worktree add` but before claim file commit | `/assign` detects existing worktree without claim file → echo "Orphan worktree at `<path>` without claim file. Run `/pr-autopilot:unassign <id>` to clean up, then retry."; does not clobber |
+
+47 test cases now (1–19 + 20a + 20b + 21 + 22–38 + 39–47, with 17 renamed 17Y) + 1 pre-flight step. 8 v0.1 gating (1, 4, 8, 11, 17Y, 22, 23, 24) + auto-trigger 25–30 (v0.3) + auto-merge 31–38 (v0.4) + pre-PR lifecycle 39–47 (v0.5).
+
+**v0.5 gating subset for v1.0.0** (must pass on a real assignment in MarcinSufa/asistel or MarcinSufa/exo-vault):
+- 39 (graceful error)
+- 41 (claim race — verified by simulating two concurrent `/assign` calls)
+- 42 (no env keys path — free-only flow)
+- 44 (approve gate enforcement)
+- 47 (recovery)
 
 ---
 

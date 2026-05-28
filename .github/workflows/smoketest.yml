@@ -85,3 +85,24 @@ jobs:
           markdownlint '**/*.md' --ignore node_modules \
             --disable MD013 MD022 MD024 MD029 MD031 MD032 MD033 MD034 MD038 MD040 MD041 MD056 \
             || (echo 'Markdown lint failed' && exit 1)
+
+  hook-tests:
+    name: hook unit tests (v0.5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Validate hook scripts have valid bash syntax
+        run: |
+          set -e
+          bash -n hooks/check-origin-main.sh
+          bash -n hooks/enforce-spec-gate.sh
+          bash -n hooks/tests/test-spec-gate.sh
+          echo "OK: all v0.5 hook scripts have valid bash syntax"
+
+      - name: Run hook unit tests
+        run: bash hooks/tests/test-spec-gate.sh

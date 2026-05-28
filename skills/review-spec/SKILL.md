@@ -174,7 +174,7 @@ For cursor-cloud-agent, run the **probe FIRST** to determine plan eligibility:
 ```bash
 # Fallback CLAUDE_PLUGIN_ROOT for manual-copy contexts (per Composer review iter3 P2-2):
 # matches the pattern documented in templates/settings-snippet.json
-bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/cache/claude-pr-autopilot/pr-autopilot/0.5.1}/hooks/cursor-cloud-agent-probe.sh"
+bash "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/cache/claude-pr-autopilot/pr-autopilot/0.5.2}/hooks/cursor-cloud-agent-probe.sh"
 PROBE_EXIT=$?
 ```
 
@@ -183,6 +183,9 @@ Based on `PROBE_EXIT`:
 - **42** → Cursor Free (plan_required). Skip cursor-cloud-agent. Append to `reviewers[]`: `{kind:"cursor-cloud-agent", status:"skipped", reason:"plan_required", iteration:<n>}`. Echo: `ℹ️ Cursor Cloud Agent skipped — requires Cursor Pro. Upgrade: https://cursor.com/settings/billing.`
 - **43** → API key invalid or missing. Skip with louder warning. Append `reason:"invalid_key"`. Echo: `⚠️ Cursor Cloud Agent skipped — API key invalid or missing. Check ~/.claude/settings.json env.CURSOR_API_KEY.`
 - **44** → Network / parse / other error. Skip with retry hint. Append `reason:"probe_error"`. Echo: `ℹ️ Cursor Cloud Agent probe failed (network/parse). Probe re-runs on next /review-spec invocation; no caching.`
+- **45** (v0.5.2) → Cursor account setting blocks Cloud Agent (Privacy Mode Legacy currently). Append `reason:"privacy_mode_legacy"`. Echo: `⚠️ Cursor Cloud Agent skipped — Privacy Mode (Legacy) blocks Cloud Agent. Disable in Cursor Settings → Privacy.`
+
+`skipReason` union (v0.5.2 extension): `plan_required | invalid_key | probe_error | no_env | privacy_mode_legacy`.
 
 Now dispatch all enabled adapters in parallel via a single Agent-tool-call message containing multiple invocations:
 

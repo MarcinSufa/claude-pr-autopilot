@@ -2,7 +2,7 @@
 
 The `cursor` reviewer adapter is the default and recommended primary reviewer for `/pr-autopilot`. It uses Cursor's GitHub App to auto-review every push.
 
-## Plan requirements (v0.5.1)
+## Plan requirements (v0.5.1+)
 
 There are **two distinct Cursor integration paths** — both require Cursor Pro for reliable operation, but for different reasons:
 
@@ -16,6 +16,19 @@ If you're on Cursor Free:
 - The `cursor-cloud-agent` dispatch in `/pr-autopilot:review-spec` returns HTTP 403 `plan_required`. v0.5.1's `hooks/cursor-cloud-agent-probe.sh` pre-flight catches this and gracefully skips the channel — `/review-spec` continues with the 2 free Claude subagents + the manual Composer 2.5 paste-back prompt. No action needed beyond noting the `ℹ️ Cursor Cloud Agent skipped` message.
 
 To enable the API path: upgrade at https://cursor.com/settings/billing, then set `CURSOR_API_KEY` in `~/.claude/settings.json` `env` block (or via `setx` / your shell profile). Restart Claude Code to propagate. EVAL scenario 50 validates the Free→graceful-skip path; EVAL scenario 43 validates the Pro→full-dispatch path.
+
+### Privacy Mode requirement (v0.5.2)
+
+Even on Cursor Pro, **Cloud Agent API is blocked by Privacy Mode (Legacy)** account setting. If you see `⚠️ Cursor Cloud Agent skipped — Privacy Mode (Legacy) blocks Cloud Agent`, fix:
+
+1. Open Cursor → Settings (`Cmd+,` or `Ctrl+,`)
+2. Find **Privacy** section
+3. **Disable** "Privacy Mode (Legacy)" OR switch to the newer "Privacy Mode" (allows Cloud Agent while preserving privacy controls)
+4. Save; no Cursor restart needed
+
+After flipping, `bash hooks/cursor-cloud-agent-probe.sh` returns exit 0. EVAL scenario 50b (probe with mock 400 Privacy-Mode response) validates the v0.5.2 detection path; T12 + T12b in `hooks/tests/test-review-spec-helpers.sh` cover both message-based and code-based detection.
+
+Discovered empirically 2026-05-28 when first upgrading Marcin's Pro plan — see ExoVault memory `3341e984` for full discovery details.
 
 ## Requirements
 

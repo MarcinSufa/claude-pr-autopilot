@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# pr-autopilot v0.5.1 — Cursor Cloud Agent plan-eligibility probe.
+# pr-autopilot v0.5.2 — Cursor Cloud Agent plan-eligibility probe.
 #
 # Pre-flight check before dispatching cursor-cloud-agent in /review-spec.
 # Exit codes are consumed by skills/review-spec/SKILL.md via `case $?`:
 #   0  — Pro plan, Cloud Agent available
 #   42 — API key valid but plan is Free / plan_required
 #   43 — API key invalid (401) or missing
-#   44 — Network / timeout / parse failure / other (non-deterministic)
+#   44 — Network / timeout / parse failure / generic validation error
+#   45 — Cursor account setting blocks Cloud Agent (Privacy Mode Legacy currently;
+#        added in v0.5.2 — Gap E discovered live 2026-05-28 when Marcin upgraded
+#        to Pro but API returned 400 "Cloud agent is not supported in Privacy Mode (Legacy)")
 #
 # Stdin: nothing.
 # Stdout: nothing (silent).
@@ -16,8 +19,10 @@
 # PR_AUTOPILOT_TEST_MODE=1 is also set. This gates testability behind explicit
 # opt-in and prevents accidental override leaking into production dispatch.
 #
-# Discovered by: dogfood iteration onboarding Asistel (ExoVault memory c7e9c5d1).
-# Spec: docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5.1-review-spec-improvements.md §5.3.
+# Discovered by: dogfood iteration onboarding Asistel (ExoVault memories
+# c7e9c5d1 = Gap C plan_required, 3341e984 = Gap E privacy_mode).
+# v0.5.1 spec: docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5.1-review-spec-improvements.md §5.3.
+# v0.5.2 spec: docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5.2-per-reviewer-summary.md §5.2.
 
 set -u  # Intentionally NOT `set -e` — we capture curl/jq exit codes and translate.
 
@@ -99,6 +104,34 @@ case "$HTTP" in
       echo "Cursor API returned 403 (code: ${CODE:-unknown})" >&2
       exit 44
     fi
+    ;;
+  400)
+    # Content-Type sniff (mirrors 403 branch — protects against WAF HTML 400s).
+    if ! head -c 1 "$TMP" 2>/dev/null | grep -q '{'; then
+      echo "Cursor API returned 400 with non-JSON body" >&2
+      exit 44
+    fi
+
+    CODE=$(jq -r '.error.code // empty' "$TMP" 2>/dev/null)
+    JQ_EXIT=$?
+    if [ "$JQ_EXIT" -ne 0 ]; then
+      echo "Cursor API returned 400 with unparseable JSON" >&2
+      exit 44
+    fi
+
+    MSG=$(jq -r '.error.message // empty' "$TMP" 2>/dev/null)
+
+    # Gap E (v0.5.2): detect Privacy Mode (Legacy) blocker via BOTH the explicit
+    # error code (future-proofs against Cursor exposing a dedicated code) AND
+    # message grep (current observed shape: code=validation_error +
+    # message containing "Privacy Mode (Legacy)"). Defense in depth.
+    if [ "$CODE" = "privacy_mode_required" ] || echo "$MSG" | grep -qi "privacy mode"; then
+      echo "Cursor Cloud Agent blocked by Privacy Mode (Legacy). Disable in Cursor Settings → Privacy." >&2
+      exit 45
+    fi
+
+    echo "Cursor API returned 400 (${CODE:-unknown}): ${MSG:-no message}" >&2
+    exit 44
     ;;
   *)
     echo "Cursor API probe failed (HTTP $HTTP)" >&2

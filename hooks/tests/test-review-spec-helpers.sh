@@ -259,6 +259,39 @@ STDERR=$(bash "$PROBE" 2>&1 >/dev/null)
 assert_exit "T8b HTTP 200 with HTML body → 44 (no false Pro-OK on proxy/captive page)" 44 $? "$STDERR"
 stop_mock
 
+# T12: HTTP 400 with Privacy Mode (Legacy) message → exit 45 (Gap E, v0.5.2).
+# Discovered live 2026-05-28: Marcin upgraded to Cursor Pro but API returned 400 with
+# "Cloud agent is not supported in Privacy Mode (Legacy)" message. v0.5.1 classified
+# as generic exit 44; v0.5.2 detects message OR error.code → actionable exit 45.
+export CURSOR_API_KEY="test-key-T12"
+export PR_AUTOPILOT_TEST_MODE=1
+start_mock 400 '{"error":{"code":"validation_error","message":"Bad Request: Cloud agent is not supported in Privacy Mode (Legacy). Switch to Privacy Mode to use cloud agents."}}'
+export CURSOR_API_URL="http://127.0.0.1:$MOCK_PORT/agents"
+STDERR=$(bash "$PROBE" 2>&1 >/dev/null)
+assert_exit "T12 HTTP 400 Privacy Mode (Legacy) message → 45" 45 $? "$STDERR"
+stop_mock
+
+# T12b: HTTP 400 with privacy_mode_required CODE but unrelated message → exit 45 (code path).
+# Defense-in-depth: detect via error.code field too, not just message text.
+# Per Composer review iter3 P1-4 (message-only detection was half-tested).
+export CURSOR_API_KEY="test-key-T12b"
+export PR_AUTOPILOT_TEST_MODE=1
+start_mock 400 '{"error":{"code":"privacy_mode_required","message":"Configuration error"}}'
+export CURSOR_API_URL="http://127.0.0.1:$MOCK_PORT/agents"
+STDERR=$(bash "$PROBE" 2>&1 >/dev/null)
+assert_exit "T12b HTTP 400 privacy_mode_required code → 45 (code-based detection)" 45 $? "$STDERR"
+stop_mock
+
+# T13: HTTP 400 with generic validation_error → exit 44 (no privacy_mode mention).
+# Ensures we don't over-classify all 400s as privacy_mode.
+export CURSOR_API_KEY="test-key-T13"
+export PR_AUTOPILOT_TEST_MODE=1
+start_mock 400 '{"error":{"code":"validation_error","message":"Required parameter missing"}}'
+export CURSOR_API_URL="http://127.0.0.1:$MOCK_PORT/agents"
+STDERR=$(bash "$PROBE" 2>&1 >/dev/null)
+assert_exit "T13 HTTP 400 generic validation_error → 44 (not privacy_mode)" 44 $? "$STDERR"
+stop_mock
+
 # T9: bootstrap-force-audit.sh — no force flag → output starts with "Bootstrap review of"
 AUDIT_SCRIPT="$HOOKS_DIR/bootstrap-force-audit.sh"
 if [ ! -x "$AUDIT_SCRIPT" ]; then chmod +x "$AUDIT_SCRIPT" 2>/dev/null; fi

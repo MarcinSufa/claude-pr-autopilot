@@ -1,10 +1,20 @@
 # Spec — claude-pr-autopilot v0.5.3 — `/cso` security audit as final-pass reviewer
 
+> ## 🛑 STATUS: DEFERRED (2026-05-28)
+>
+> **This spec is NOT a live implementation target.** Iter1 `/pr-autopilot:review-spec --bootstrap` review surfaced **7 P0 + 11 P1 + 3 P2 findings**, including 2 P0s that are demonstrably false architectural assumptions verified against the actual cso skill source (Phase 13 *is* the findings report; Phase 8 *also* calls AskUserQuestion). The integration cannot ship without upstream gstack changes.
+>
+> **Decision:** see [`docs/decisions/0002-v0.5.3-cso-final-pass-deferred.md`](../../decisions/0002-v0.5.3-cso-final-pass-deferred.md) for the full rationale, alternatives considered, and the 7 prerequisites that must be met before this spec can be revived.
+>
+> **Why kept in tree:** the design exploration (config schema, derivation table extension, severity gate, PR-comment format) is reusable when the upstream prerequisite lands. Deleting would discard institutional memory of why we tried and what reviewers found.
+>
+> ---
+
 **Data:** 2026-05-28
 **Branch:** `feat/cso-final-pass`
 **Worktree:** `c:\Users\sufam\IdeaProjects\claude-pr-autopilot-cso` (off `origin/main@f4bafa6`, post v0.5.2)
 **Spec autor:** claude_code (Opus 4.7 1M)
-**Iteracja:** v1 (pre-review)
+**Iteracja:** v1 (pre-review) — **superseded by ADR 0002 deferral**
 
 ---
 

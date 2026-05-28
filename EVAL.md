@@ -157,10 +157,9 @@ Two new scenarios + one variant in v0.5.2 (commits 1-3):
 **v0.5.2 gating subset for "field-validated"** (extends v0.5.1; does not replace):
 
 - T12 + T12b + T13 unit tests pass (16/16 total in `test-review-spec-helpers.sh`)
-- 50b validates live (Marcin's account currently on Privacy Mode — non-Legacy — so 50b is satisfied by inversion: probe returns 0; the EVAL would re-fire if Marcin ever toggles back to Legacy)
 - 51 validates on next real `/review-spec` invocation (e.g., the Asistel onboarding bootstrap review)
 
-EVAL 50b was demoted from gating in v0.5.2 (per Composer review iter3 P1-4) — unit tests provide sufficient coverage; live verification optional.
+EVAL 50b is NOT part of the gating subset (demoted per Composer review iter3 P1-4) — unit tests T12/T12b provide sufficient coverage of the Privacy-Mode-Legacy code path. Live verification on a real Cursor account is optional manual check only.
 
 ---
 

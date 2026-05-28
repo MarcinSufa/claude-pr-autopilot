@@ -57,7 +57,7 @@ Each commit standalone-revertable. PR review can approve commits individually if
 | Plik | Status | Commit | Cel |
 |---|---|---|---|
 | `hooks/cursor-cloud-agent-probe.sh` | MODIFY | 1 | Case 400 branch: detect Privacy Mode via `error.code` + message grep → exit 45. |
-| `hooks/tests/test-review-spec-helpers.sh` | MODIFY | 1 | New T12 (privacy mode 400 → 45), T13 (generic 400 → 44). |
+| `hooks/tests/test-review-spec-helpers.sh` | MODIFY | 1 | New T12 (privacy mode 400 message → 45), T12b (privacy_mode_required code → 45), T13 (generic 400 → 44). |
 | `reviewers/CURSOR-SETUP.md` | MODIFY | 1 | Add "Privacy Mode requirement" subsection. |
 | `skills/review-spec/SKILL.md` | MODIFY | 1 + 2 | Step 2 case `45)` branch (commit 1). Step 4 table gains 3 columns + outlier footer + derivation-only Score (commit 2). |
 | `EVAL.md` | MODIFY | 1 + 2 | New scenario 50b (Gap E live skip — commit 1). New scenario 51 (per-reviewer table — commit 2). |
@@ -207,7 +207,7 @@ Exit code 45 added (v0.5.1 used 0/42/43/44 — verified no collision via grep).
 
 #### 5.2.3 Tests
 
-New T12 + T13 (per hostile P1-7 — defense in depth):
+New T12 + T12b + T13 (per hostile P1-7 message-or-code defense in depth + Composer P1-4 code-path test):
 
 ```bash
 # T12a: 400 with privacy-mode message → exit 45 (message-based detection)
@@ -226,13 +226,13 @@ assert_exit "T13 HTTP 400 generic → 44" 44 $? "$STDERR"
 
 Total after v0.5.2: 13 (v0.5.1) + 3 new (T12, T12b, T13) = **16 tests**.
 
-**Test count math (code-reviewer P1 typo fix):**
+**Test count math** (post-v2.1 update — earlier draft mis-counted by omitting T12b):
 - v0.5.1 harness: T1, T2, T3, T4, T5, T6, T7, T7b, T8, T8b, T9, T10, T11 = **13 tests** (with `b` variants counted)
-- v0.5.2 adds T12, T13 = **2 new**
-- Total after v0.5.2: **15 tests** (13 + 2)
-- Range label: T1-T13 covers 13 numbered labels but counts include T7b + T8b, so the natural label is "T1-T11 + T7b + T8b + T12 + T13" or just "15 tests".
+- v0.5.2 adds T12, T12b, T13 = **3 new** (T12b added in v2.1 per Composer P1-4 — defense-in-depth code-vs-message detection)
+- Total after v0.5.2: **16 tests** (13 + 3)
+- Range label: "T1-T11 + T7b + T8b + T12 + T12b + T13" — explicit enumeration since the bare `T1-T13` range collides with the `b` variants.
 
-Spec acceptance §6 uses "15/15 PASS" — explicit count, no range ambiguity.
+Spec acceptance §6 uses "16/16 PASS" — explicit count matching the enumeration.
 
 ### 5.3 v0.6 MCP rejection ADR (commit 3)
 
@@ -294,7 +294,7 @@ Per Marcin workflow rule #3:
 **Post-merge EVAL gating:**
 
 8. **EVAL 51** — Step 4 table shows 6 columns: Reviewer, Model, Score (derived), Time, Findings, Verdict. Outlier footer fires when any reviewer score ≤ 2. Manual visual inspection on next real `/review-spec` invocation.
-9. **EVAL 50b removed from gating** (per hostile P1-4 — was "test we skip in practice"). T12 unit test covers the Gap E path. If Marcin wants to verify live, optional manual check only.
+9. **EVAL 50b removed from gating** (per hostile P1-4 — was "test we skip in practice"). T12 + T12b unit tests cover the Gap E path (message-based and code-based detection). If Marcin wants to verify live, optional manual check only.
 10. **EVAL 43 live** — already validated 2026-05-28 17:30 (probe exit 0 after Privacy Mode flip).
 11. **ADR usable** — Marcin or future contributor reads `docs/decisions/0001-v0.6-mcp-server-rejected.md` without conversation context, understands rejection rationale, sees 6-prerequisite gate.
 
@@ -319,7 +319,7 @@ Per Marcin workflow rule #3:
 
 ## 8. Test plan
 
-1. **Unit (bash):** `bash hooks/tests/test-review-spec-helpers.sh` — 15 tests (T1-T11 + T7b + T8b + T12 + T13).
+1. **Unit (bash):** `bash hooks/tests/test-review-spec-helpers.sh` — 16 tests (T1-T11 + T7b + T8b + T12 + T12b + T13).
 2. **Regression:** `test-spec-gate.sh` 14/14 + `test-trigger.sh` 15/15.
 3. **Markdownlint:** clean on all .md files touched (SKILL.md, EVAL.md, ROADMAP.md, spec, ADR, decisions/README).
 4. **Live Cursor probe:** `bash hooks/cursor-cloud-agent-probe.sh` → exit 0 (Pro+Privacy validated 2026-05-28 17:30).
@@ -383,7 +383,7 @@ Squash-merge would collapse to single commit; spec PR description documents the 
 | F4 | P1 | CR | Score rubric P2-only ambiguity | Added explicit "0 P0 + 0 P1 + ≥5 P2 → 4" rule + commented "P2 only counts in P0=P1=0 branch" (§5.1.1). |
 | F5 | P1 | CR | `total_tokens` Agent tool unverified | Moot — Tokens column dropped (F2). |
 | F6 | P1 | CR | Aggregate avg hides 1/5 outlier | Added **outlier footer** at Step 4 when any score ≤ 2 (§5.1.2). |
-| F7 | P1 | CR | Test count math typo (13+2=15 vs T1-T13) | Fixed: 13 tests in v0.5.1 (with T7b/T8b counted) + 2 new (T12, T13) = 15 total. Acceptance §6.2 says explicit "15/15 PASS". |
+| F7 | P1 | CR | Test count math typo (13+2=15 vs T1-T13) | Fixed: 13 tests in v0.5.1 (with T7b/T8b counted) + 3 new in v2.1 (T12, T12b, T13) = 16 total. Acceptance §6.2 says explicit "16/16 PASS". (Initial v2 only added T12+T13; T12b added in v2.1 per Composer P1-4 — count corrected here.) |
 | F8 | P1 | Hostile | ADR + ROADMAP redundancy | **ROADMAP shrunk to 1 line** with link to ADR (§5.3.2). ADR is canonical. |
 | F9 | P1 | Hostile | EVAL 50b is "test we skip" | **Removed from gating** (§6 item 9). T12 unit test covers. Optional manual check only. (Cross-ref typo §9.2 → §6.9 fixed per Composer P2-1.) |
 | F10 | P1 | Hostile | Score mean ambiguity with `—` rows | Spec: mean excludes skipped/manual rows (§5.1.1, §5.1.3). |

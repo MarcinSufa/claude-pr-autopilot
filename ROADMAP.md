@@ -24,6 +24,39 @@ blocklist), CI-gated, queued-vs-merged handled by a merge-wait short-circuit (st
 squash when a repo lacks GitHub auto-merge. Never auto-invokes `/land-and-deploy` (notify + recommend only).
 Spec: docs/superpowers/specs/2026-05-24-pr-autopilot-v0.4-auto-merge-design.md.
 
+## v0.5.1 — Review-spec improvements (this patch)
+Patch release on top of v0.5.0. Four gaps fixed in `/pr-autopilot:review-spec`,
+all discovered during the real onboarding of pr-autopilot into MarcinSufa/asistel:
+
+- **Gap A** — new `--bootstrap <path>` mode for spec review without a claim file
+  (bootstrap PRs that introduce pr-autopilot have no assignment yet). Includes
+  explicit Mode-detection section, argument parsing protocol (`=` and whitespace
+  forms, ENOENT refusal, single-dash refusal, duplicate-flag refusal), and a
+  technical enforcement guard that refuses `--bootstrap` in repos with active
+  assignments (`assignments.yaml` + non-empty `.claude/assignment-claims/`)
+  unless `--force` is appended (with `[BOOTSTRAP_FORCE]` audit signal).
+- **Gap B** — Composer 2.5 manual prompt is now a single triple-backtick fenced
+  code block with the spec path baked in at skill runtime (no `<path>` placeholder).
+  One-click copy from most terminals/editors.
+- **Gap C** — new `hooks/cursor-cloud-agent-probe.sh` pre-flight that distinguishes
+  exit codes 0 (Pro)/42 (Free plan_required)/43 (invalid key)/44 (network/parse).
+  `CURSOR_API_URL` env override gated behind `PR_AUTOPILOT_TEST_MODE=1` sentinel.
+  Dispatch always hits production `api.cursor.com`.
+- **Gap D.1** — progress visibility: status table printed at dispatch + final
+  aggregated table at completion + TodoWrite mirror for sticky chat-side
+  persistence. NOT TRUE incremental (atomic update at Step 4); D.2 in v0.6.
+
+Spec: `docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5.1-review-spec-improvements.md`.
+Test coverage: `hooks/tests/test-review-spec-helpers.sh` (8 tests T1–T8) + EVAL
+scenarios 48 + 48-NEG-A/B/C + 49 + 50 + 50-NEG + 48b (Marcin-local dogfood).
+
+Note: this version was developed on branch `feat/v0.6-review-spec-improvements`,
+named before the semver decision finalized to v0.5.1 (PATCH for additive
+backwards-compatible bug fixes; v0.6 stays reserved for the runtime adapter below).
+
+ROADMAP.md is also the release log for this project — no separate CHANGELOG.md
+by design.
+
 ## v0.5 — Pre-PR lifecycle (current)
 Adds the **complete pre-PR layer** on top of v0.4's post-PR loop. Atomic assignment claim
 via `git worktree add -b origin/main` (filesystem-atomic via git refs), spec drafting,
@@ -36,9 +69,36 @@ on `main` only. Five new skills (`assign`, `review-spec`, `approve-spec`, `pr-op
 compat: v0.4 skills (`allow`, `automerge`, `pause`, `resume`, `step`) unchanged.
 Spec: `docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5-pre-pr-lifecycle-design.md`.
 
-## v0.6 / Future — Cursor-native runtime adapter (Path C)
+## v0.6 / Future — Cursor-native runtime adapter (Path C) + progress D.2 + cross-skill E/F
 Port the loop layer to Cursor primitives. Algorithm unchanged; only the loop driver moves.
 (Previously tentatively numbered v0.5; pushed to v0.6 to make room for pre-PR lifecycle.)
+
+v0.6 also picks up the progress-visibility items deferred from v0.5.1:
+
+- **D.2 — TRUE incremental progress** (Gap D.2). Each reviewer completion updates
+  the status table mid-flight, not just at aggregation. Two architectures
+  under evaluation (decision deferred to v0.6 design phase):
+  1. **Hooks-based** — extend `settings.json` PostToolUse to match Agent calls;
+     hook writes per-reviewer status to `~/.pr-autopilot/<claim-id>/progress.jsonl`;
+     skill polls the file via `/review-spec --status` or `--watch`.
+     Limitation: still between-turn; no live mid-turn UI updates.
+  2. **MCP-server-based** — new `pr-autopilot-status` MCP server exposes
+     `track_review_progress(claim_id)` as a streaming tool. Reviewer completions
+     publish events to the stream; Claude/Cursor UI subscribes and re-renders
+     incrementally. SOLVES TRUE-incremental properly but adds new infrastructure
+     (MCP server + tests + registration in settings.json) — work suitable for
+     a minor version bump.
+- **E — Progress in implementation phase** (cross-skill). Apply D.1's table+TodoWrite
+  pattern to `/assign` + `/approve-spec` TDD cycle. Status rows: current file,
+  test pass/fail, lint, build.
+- **F — Progress in PR review phase** (cross-skill). Apply same pattern to
+  `/pr-opened` + `/step` loop. Status rows: per-iteration reviewer
+  (Cursor/Copilot/Codex), score, threads to triage, fix-commit pushed.
+- **Cross-skill template extraction** — once 3 of 5 skills implement D.1's
+  pattern (rule-of-three), extract a shared status-table helper into
+  `skills/_shared/progress-table.md`.
+
+These extend the D.1 pattern shipped in v0.5.1; do not replace it.
 
 ## v1.0.0 (stability gate)
 

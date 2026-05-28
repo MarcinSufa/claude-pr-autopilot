@@ -154,5 +154,6 @@ Ranked by leverage:
 - **Reviewer-less mode** — pre-flight config validator ABORTs if no per-iter reviewer enabled. Nothing would drive the loop.
 - **Claude-self as primary loop reviewer** — Claude grading Claude converges in one step. Final-pass only by design.
 - **MCP server for review dispatch** — proposed and rejected 2026-05-28. See [ADR 0001](docs/decisions/0001-v0.6-mcp-server-rejected.md).
+- **`/cso` security audit as final-pass reviewer (in-process)** — v0.5.3 proposed and deferred 2026-05-28. Blocked on upstream gstack `/cso --non-interactive` flag (Phase 8 + Phase 13 both call `AskUserQuestion`). See [ADR 0002](docs/decisions/0002-v0.5.3-cso-final-pass-deferred.md) + original spec at [`docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5.3-cso-final-pass.md`](docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5.3-cso-final-pass.md).
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for full architecture rationale.

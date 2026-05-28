@@ -98,11 +98,18 @@ srv.serve_forever()
 }
 
 stop_mock() {
+  # NOTE: do NOT `wait $MOCK_PID` — on MSYS/Git-Bash for Windows the python
+  # subprocess may not be a direct child of this shell, so wait hangs forever.
+  # `kill` + small sleep is more portable. Per code-reviewer iter2 finding.
   if [ -n "${MOCK_PID:-}" ]; then
     kill "$MOCK_PID" 2>/dev/null
-    wait "$MOCK_PID" 2>/dev/null
+    sleep 0.2
     unset MOCK_PID
     unset MOCK_PORT
+  fi
+  if [ -n "${MOCK_LOG:-}" ]; then
+    rm -f "$MOCK_LOG"
+    unset MOCK_LOG
   fi
 }
 
@@ -194,23 +201,44 @@ export CURSOR_API_URL="http://127.0.0.1:1/agents"
 STDERR=$(bash "$PROBE" 2>&1 >/dev/null)
 assert_exit "T6 connection refused → 44 (network)" 44 $? "$STDERR"
 
-# T7: PR_AUTOPILOT_TEST_MODE NOT set + CURSOR_API_URL set → override is IGNORED
-# (probe should use production URL https://api.cursor.com — fails with 43/44 depending on
-# whether real Cursor responds to fake key; both are acceptable, key is the override didn't leak).
+# T7: PR_AUTOPILOT_TEST_MODE NOT set + CURSOR_API_URL → override MUST NOT leak.
+# Signal: probe exit code. If probe exits 0, override leaked (only mock returns
+# 200; production api.cursor.com always 401s a bogus key). If probe exits
+# non-zero (43/44), override correctly ignored → production URL was used.
+# Per hostile review iter2 finding: old test accepted exit 43 OR 44, which was
+# ambiguous because 44 could mean leak (override hit unbindable :1) OR no-leak
+# (real Cursor returned non-401). New signal — "not 0" — is unambiguous.
+#
+# Network requirement: T7 reaches https://api.cursor.com — needs egress. In
+# air-gapped CI this would return 44 (network failure) which still satisfies
+# the "not 0" assertion → no-leak is correctly inferred. Per Composer review
+# iter3 finding (P1-3).
+
 unset PR_AUTOPILOT_TEST_MODE
 export CURSOR_API_KEY="bogus-not-real-cursor-key-for-T7"
-export CURSOR_API_URL="http://127.0.0.1:1/agents"   # should be ignored
+start_mock 200 '{"runs":[]}'
+export CURSOR_API_URL="http://127.0.0.1:$MOCK_PORT/agents"   # MUST be ignored
 STDERR=$(bash "$PROBE" 2>&1 >/dev/null)
 ACTUAL=$?
-if [ "$ACTUAL" = "43" ] || [ "$ACTUAL" = "44" ]; then
+if [ "$ACTUAL" != "0" ]; then
   PASS=$((PASS + 1))
-  echo "✓ T7 TEST_MODE sentinel gates URL override (got $ACTUAL — production URL used, not override)"
+  echo "✓ T7 TEST_MODE=off + override URL — probe did NOT exit 0 (no leak; exit=$ACTUAL)"
 else
   FAIL=$((FAIL + 1))
-  echo "✗ T7 expected 43 or 44 (production URL used), got $ACTUAL"
-  echo "  This means CURSOR_API_URL leaked into production dispatch — security regression."
-  [ -n "$STDERR" ] && echo "  stderr: $STDERR" | head -c 300 && echo ""
+  echo "✗ T7 probe exited 0 — CURSOR_API_URL leaked (probe hit mock returning 200 instead of production)"
 fi
+stop_mock
+
+# T7b: TEST_MODE=1 + CURSOR_API_URL=mock(returns 200) → probe MUST exit 0
+# (Proves the gate's positive case — override is honored when explicitly opted in.)
+export PR_AUTOPILOT_TEST_MODE=1
+export CURSOR_API_KEY="test-key-T7b"
+start_mock 200 '{"runs":[]}'
+export CURSOR_API_URL="http://127.0.0.1:$MOCK_PORT/agents"
+STDERR=$(bash "$PROBE" 2>&1 >/dev/null)
+assert_exit "T7b TEST_MODE=on + override URL → 0 (mock hit, override active)" 0 $? "$STDERR"
+stop_mock
+unset PR_AUTOPILOT_TEST_MODE
 
 # T8: HTTP 403 with HTML body (e.g., CloudFront WAF) → exit 44 (parse failure)
 export CURSOR_API_KEY="test-key-html"
@@ -220,6 +248,51 @@ export CURSOR_API_URL="http://127.0.0.1:$MOCK_PORT/agents"
 STDERR=$(bash "$PROBE" 2>&1 >/dev/null)
 assert_exit "T8 HTTP 403 with HTML body → 44 (non-JSON, no silent 42)" 44 $? "$STDERR"
 stop_mock
+
+# T8b: HTTP 200 with HTML body (corp proxy "you are blocked") → exit 44 (don't trust 200 unconditionally)
+# Per hostile review iter2 finding (probe trusted 200 unconditionally).
+export CURSOR_API_KEY="test-key-html-200"
+export PR_AUTOPILOT_TEST_MODE=1
+start_mock_html 200 '<html><body>Corporate proxy: blocked.</body></html>'
+export CURSOR_API_URL="http://127.0.0.1:$MOCK_PORT/agents"
+STDERR=$(bash "$PROBE" 2>&1 >/dev/null)
+assert_exit "T8b HTTP 200 with HTML body → 44 (no false Pro-OK on proxy/captive page)" 44 $? "$STDERR"
+stop_mock
+
+# T9: bootstrap-force-audit.sh — no force flag → output starts with "Bootstrap review of"
+AUDIT_SCRIPT="$HOOKS_DIR/bootstrap-force-audit.sh"
+if [ ! -x "$AUDIT_SCRIPT" ]; then chmod +x "$AUDIT_SCRIPT" 2>/dev/null; fi
+OUTPUT=$(bash "$AUDIT_SCRIPT" "/tmp/test-spec.md" 2>/dev/null)
+ACTUAL=$?
+if [ "$ACTUAL" = "0" ] && echo "$OUTPUT" | grep -q "^Bootstrap review of /tmp/test-spec.md at "; then
+  PASS=$((PASS + 1))
+  echo "✓ T9 audit (no force) → exit 0 + 'Bootstrap review of <path> at <iso>'"
+else
+  FAIL=$((FAIL + 1))
+  echo "✗ T9 expected exit 0 + 'Bootstrap review of /tmp/test-spec.md at ...'; got exit=$ACTUAL, output=$OUTPUT"
+fi
+
+# T10: bootstrap-force-audit.sh — with force flag → output starts with "[BOOTSTRAP_FORCE]"
+OUTPUT=$(bash "$AUDIT_SCRIPT" "/tmp/test-spec.md" force 2>/dev/null)
+ACTUAL=$?
+if [ "$ACTUAL" = "0" ] && echo "$OUTPUT" | grep -q "^\[BOOTSTRAP_FORCE\] Bootstrap review of /tmp/test-spec.md at "; then
+  PASS=$((PASS + 1))
+  echo "✓ T10 audit (force) → exit 0 + '[BOOTSTRAP_FORCE] Bootstrap review of <path> at <iso>'"
+else
+  FAIL=$((FAIL + 1))
+  echo "✗ T10 expected exit 0 + '[BOOTSTRAP_FORCE] ...'; got exit=$ACTUAL, output=$OUTPUT"
+fi
+
+# T11: bootstrap-force-audit.sh — missing args → exit 2
+OUTPUT=$(bash "$AUDIT_SCRIPT" 2>&1)
+ACTUAL=$?
+if [ "$ACTUAL" = "2" ] && echo "$OUTPUT" | grep -qi "usage"; then
+  PASS=$((PASS + 1))
+  echo "✓ T11 audit (no args) → exit 2 + usage message"
+else
+  FAIL=$((FAIL + 1))
+  echo "✗ T11 expected exit 2 + usage message; got exit=$ACTUAL, output=$OUTPUT"
+fi
 
 # ─── Results ───────────────────────────────────────────────────────────────
 echo ""

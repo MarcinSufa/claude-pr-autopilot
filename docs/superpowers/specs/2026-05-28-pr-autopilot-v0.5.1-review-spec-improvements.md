@@ -369,7 +369,7 @@ esac
 
 - The probe accepts `CURSOR_API_URL` override **ONLY** when `PR_AUTOPILOT_TEST_MODE=1` is also set. This gates testability behind an explicit opt-in.
 - The dispatch (the `curl -sX POST` above) ALWAYS uses `https://api.cursor.com/v1/agents` — NO env override.
-- This asymmetry is intentional: tests should validate probe LOGIC, not full dispatch (which is covered by live EVAL 43 requiring real Pro plan). Dispatch hitting production with a spec body is acceptable only with real plan eligibility; mocking it would teach nothing.
+- This asymmetry is intentional: tests should validate probe LOGIC, not full dispatch (which is covered by EVAL 43 "all keys set + Pro available" as a live integration test, NOT by mocked unit tests). Dispatch hitting production with a spec body is acceptable only with real plan eligibility; mocking it would teach nothing.
 ```
 
 ### 5.4 Gap D.1 — Progress visibility (status table + TodoWrite mirror)

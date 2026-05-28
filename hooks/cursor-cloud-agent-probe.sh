@@ -46,7 +46,10 @@ fi
 
 # ─── Probe ─────────────────────────────────────────────────────────────────
 # mktemp avoids $$ collision when probe runs concurrently.
-TMP=$(mktemp -t pr-autopilot-cursor-probe.XXXXXX) || {
+# Portable form: works on GNU coreutils (Linux) AND BSD (macOS, Git Bash for Windows).
+# The bare-`mktemp -t pattern.XXX` form is GNU-only; explicit TMPDIR template works
+# on both. Per review iter2 finding (mktemp portability).
+TMP=$(mktemp "${TMPDIR:-/tmp}/pr-autopilot-cursor-probe.XXXXXX") || {
   echo "could not create temp file" >&2
   exit 44
 }
@@ -59,6 +62,14 @@ HTTP=$(curl -sS -m 8 -o "$TMP" -w "%{http_code}" \
 # ─── Decode response ───────────────────────────────────────────────────────
 case "$HTTP" in
   200)
+    # Body sanity check: a corp proxy may return HTTP 200 with HTML
+    # ("You are blocked" pages, captive portals, etc.). Without this sniff,
+    # probe greenlights Cloud Agent dispatch on a misconfigured network.
+    # Per review iter2 finding (probe trusts 200 unconditionally).
+    if ! head -c 1 "$TMP" 2>/dev/null | grep -q '{'; then
+      echo "Cursor API returned 200 with non-JSON body (likely proxy or captive portal)" >&2
+      exit 44
+    fi
     exit 0
     ;;
   401)

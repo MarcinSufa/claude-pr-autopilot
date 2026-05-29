@@ -1,39 +1,32 @@
-# Spec — claude-pr-autopilot v0.5.3 — graphify code knowledge graph integration
+# Spec — claude-pr-autopilot v0.5.3 — graphify code knowledge graph awareness (scope-reduced)
 
-**Data:** 2026-05-29 (iter2 revision after iter1 review)
+**Data:** 2026-05-29 (iter3 — scope-reduced revision after iter1 + iter2)
 **Branch:** `feat/v0.5.3-graphify-integration`
 **Worktree:** `c:\Users\sufam\IdeaProjects\claude-pr-autopilot-graphify` (off `origin/main@a93a69f`)
 **Spec autor:** claude_code (Opus 4.7 1M)
-**Iteracja:** v2 (post 3-reviewer iter1 — 9 P0 / 15 P1 / 10 P2 → addressed in this revision; see §A iter1 audit log)
-**Prior art:** ExoVault memories `a9df909c` (original v0.5.3 candidate), `fb285a18` ("yes do it for 0.5.3"), `ca13f9dd` (Asistel build evidence)
-**Slot freed by:** [ADR 0002](../../decisions/0002-v0.5.3-cso-final-pass-deferred.md) (cso deferred)
+**Iteracja:** v3 — **scope reduced** (recipe + Mode Y @copilot augmentation DROPPED; see §A audit log for full disposition)
+**Prior art:** ExoVault memories `a9df909c`, `fb285a18`, `ca13f9dd`
+**Slot freed by:** [ADR 0002](../../decisions/0002-v0.5.3-cso-final-pass-deferred.md)
 
 ---
 
 ## 1. Cel (1 zdanie)
 
-Dodać **opt-in graphify code knowledge graph awareness** w `/pr-autopilot:assign`, `/pr-autopilot:step` (Mode X), oraz `/pr-autopilot:review-spec` — filesystem-only pre-check sprawdza czy `graphify-out/graph.json` istnieje, **default `advisory=auto` = INFO + continue, opt-in `advisory=always` = PAUSE**, dispatched subagents w `/review-spec` + main-loop triage w `/step` otrzymują hint o graf-query-first pattern. Cel: redukcja tokenów na symbol-lookup pytaniach w pr-autopilot loop (zmierzona empirycznie po v0.5.3 ship; nie obiecujemy konkretnego procentu).
+Dodać **opt-in graphify code knowledge graph awareness** w `/pr-autopilot:assign`, `/pr-autopilot:step` (Mode X), oraz `/pr-autopilot:review-spec` — filesystem-only pre-check dla `graphify-out/graph.json`, **advisory=auto = INFO + continue, advisory=always = PAUSE**, dispatched subagents w `/review-spec` + main-loop triage w `/step` step 10 otrzymują hint o graf-query-first pattern. **Sharing model (commit-vs-CI-vs-vault) jest USER-DRIVEN choice; v0.5.3 NIE prescribes a recipe** — README zawiera krótki pointer do trzech approaches z honest tradeoffs.
 
 ---
 
 ## 2. Wersjonowanie
 
-**v0.5.2 → v0.5.3 (PATCH).** Strictly additive + state schema bump v3 → v4 (purely additive fields with safe defaults):
+**v0.5.2 → v0.5.3 (PATCH).** Strictly additive + state schema bump v3 → v4 (purely additive fields):
 
-- Nowy pre-flight check 0.4b (named anchor, NOT renumbered — per ADR 0002 lesson)
-- Modyfikacje subagent prompts w `/review-spec` (FREE Claude subagents) + main-loop triage preamble w `/step` step 10
-- New repo-setup recipe in `docs/recipes/graphify-team-setup.md`
-- State schema v3 → v4 with additive fields + migration block (matches v0.4 auto-merge fields pattern from existing SKILL.md)
+- New pre-flight check at 0.4b (named anchor)
+- State schema v3 → v4 (additive: `graphifyAvailable`, `graphifyBuiltAtCommit`)
+- New `state.graphifyAvailable=true` triggers prompt enhancement in `/review-spec` adapter prompts + `/step` step 10 triage preamble
+- New brief "Code knowledge graph (graphify)" subsection in README pointing to (but not prescribing) 3 sharing approaches
+- 7 new EVAL scenarios (renumbered 52-52g, fixing iter2 P0 #1 collision with existing scenario 26)
 
-Single commit (cohesive feature, no granular revert value).
-
-**v0.5.3 NIE wprowadza** (deferred to v0.5.4+ or skipped):
-
-- `--force-graphify` flag (Option A sharing — graph committed to repo, always present after `git pull`)
-- Auto-build of missing graph by pr-autopilot (cost surprise = bad UX; user runs `/graphify .` themselves)
-- Subagent graph-excerpt injection (hint only; subagent decides what to query)
-- `graphify.minimumStaleness` config (defer to v0.5.4 — needs `built_at_commit` ancestry check infrastructure)
-- Mode Y SWE Agent automatic hint injection beyond the `@copilot` comment body (limited by GitHub-controlled prompt)
+Single commit.
 
 ---
 
@@ -41,24 +34,13 @@ Single commit (cohesive feature, no granular revert value).
 
 Pr-autopilot becomes **graph-aware**:
 
-- **Default behavior (`advisory=auto`):** Pre-check looks for `graphify-out/graph.json`. If present → silent pass; subagents get the hint. If missing → ONE-TIME INFO notification ("this repo has no knowledge graph — `/graphify .` would reduce subagent tokens"), loop continues normally. Notification flag is **per-repo, not per-PR** (stored in `~/.pr-autopilot/<owner>-<repo>-graphify-notice.flag`) so it doesn't re-fire on every new PR.
-- **Strict mode (`advisory=always`):** PAUSE with actionable message if graph missing. Opt-in for teams that have decided "graph is mandatory."
-- **Off (`advisory=off`):** Skip the check entirely. For repos that explicitly don't want graphify.
+- **Default behavior (`advisory=auto`):** Filesystem check for `graphify-out/graph.json`. Present → silent pass + subagents/triage get the hint. Absent → ONE-TIME per-repo INFO notification suggesting `/graphify .`, loop continues normally.
+- **Strict mode (`advisory=always`):** PAUSE with actionable message if graph missing.
+- **Off (`advisory=off`):** Skip the check entirely.
 
-No auto-build. No cost surprises. pr-autopilot doesn't query the graph itself; it nudges Claude (the loop driver) and dispatched subagents to use it.
+**No auto-build. No prescribed sharing model. No comment-body augmentation.** v0.5.3 is a minimal awareness mechanism — sharing recipe is deferred to v0.5.4 after empirical hook testing.
 
-**Sharing model (Option A, decided 2026-05-28):**
-
-Recipe `docs/recipes/graphify-team-setup.md` documents the canonical sharing pattern:
-
-1. Commit `graphify-out/graph.json` to the repo (portable per Asistel 2026-05-28 verification — relative paths only, no `*_API_KEY` patterns detected by recipe step 4 scan)
-2. `.gitignore` uses **whitelist pattern** (per iter1 P0-4): `graphify-out/*` + `!graphify-out/graph.json` — defends against future graphify version adding new artifacts
-3. `.gitattributes`: `graphify-out/graph.json merge=graphify-merge linguist-generated=true` — registers merge driver + hides diff in GitHub PRs (lockfile-style; per iter1 P1-6)
-4. **Manual setup per clone** (graphify v0.8.22 `hook install` does NOT auto-register merge driver per iter1 P1-2; verified against `safishamsi/graphify@v0.8.22` source): `git config merge.graphify-merge.driver "graphify merge-driver %O %A %B"`
-5. **Post-commit hook** (matches upstream graphify hook model per iter1 P1-1, NOT pre-commit): `graphify update . 2>/dev/null || true; git add graphify-out/graph.json 2>/dev/null || true`. Graceful degrade by design — never blocks user's commit.
-6. Mandatory pre-commit secret scan (per iter1 P1-6): added to recipe for ongoing protection beyond initial portability check
-
-Result: teammates pull → graph current. Commit code → post-commit hook updates graph for next commit. Merge conflicts on graph.json → resolved by union-merge driver if both clones have driver configured; otherwise teammate sees explicit guidance from pre-flight 0.4b warning.
+**Why the scope reduction (from iter2):** the original iter2 recipe shipped 7 of the 8 P0 surface area (auto-amend `--no-verify` recursion empirically verified to fire 6 times in a tmp repo, `built_at_commit` confabulation, `graphify update` doesn't update doc-files, `@copilot` comment body unsupported speculation, gitleaks "MANDATORY" without integration). The pr-autopilot integration itself (~60 lines of skill edits) is conceptually clean and survives. v0.5.3 ships the clean part; the recipe gets its own spec once we've tested a hook pattern end-to-end in `/tmp`.
 
 ---
 
@@ -66,37 +48,31 @@ Result: teammates pull → graph current. Commit code → post-commit hook updat
 
 | Plik | Status | Cel |
 |---|---|---|
-| `skills/step/SKILL.md` | MODIFY | Pre-flight check 0.4b (filesystem-only); §0.5 Load State migration v3→v4 + new state fields; §10 triage **preamble** hint (NOT subagent prompt — corrects iter1 P0-5); stop conditions table extension; Mode X step 5.5 `@copilot` comment body augmentation. |
-| `skills/review-spec/SKILL.md` | MODIFY | Adapter prompt templates (Step 2) gain a graphify hint line via **dispatch-time filesystem check** (NOT state lookup — bootstrap mode has no PR state per iter1 P0-4). |
-| `skills/assign/SKILL.md` | MODIFY | Pre-flight equivalent: **always advisory, never PAUSE** (per iter1 P0 #1) — even broken-folder case generates INFO, not PAUSE. Filesystem-only check, no claim file state interaction. |
-| `docs/recipes/graphify-team-setup.md` | NEW | Recipe for Option A sharing model: gitignore whitelist + gitattributes (merge + linguist-generated) + manual merge driver config + **post-commit** hook + secret scan + Windows PowerShell variant for portability regex. |
-| `EVAL.md` | MODIFY | Scenario 26 (happy path, graph present), 26b (auto + missing → INFO once + continue), 26c (always + missing → PAUSE), 26d (broken folder + step → PAUSE with rebuild message), 26e (always + broken → PAUSE; `advisory=off` + missing → silent pass), 26f (graphify CLI installed but absent from PATH at subagent invocation → subagent falls back to grep gracefully). |
-| `README.md` | MODIFY | One-paragraph "Code knowledge graph awareness" subsection; **explicit Mode Y carve-out** (per iter1 P1-8: hint reaches subagents + `@copilot` comment body, but SWE Agent's internal prompt can't be modified). Token-reduction claim labeled "expected; not yet measured." |
-| `.claude-plugin/plugin.json` | MODIFY | Bump `"version": "0.5.2"` → `"0.5.3"`. |
-| `docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5.3-graphify-integration.md` | NEW (this file) | Spec, iter2. |
+| `skills/step/SKILL.md` | MODIFY | Pre-flight 0.4b (filesystem-only `_graphifyFsState`); state schema v3→v4 bump + additive field defaults; new §0.5a (post-load state setting + advisory dispatch) **placed AFTER §0.6 merge-wait short-circuit** (per iter2 P0 #5 — auto-merge wait must not be disturbed); §10 triage **preamble** hint (APPEND position per iter2 P1 #7 — long context); stop conditions table extension. |
+| `skills/review-spec/SKILL.md` | MODIFY | Adapter prompt templates (Step 2) gain graphify hint via **dispatch-time filesystem check** (NOT state lookup — bootstrap mode has no PR state per iter1 P0). |
+| `skills/assign/SKILL.md` | MODIFY | Pre-flight equivalent: **always advisory, never PAUSE** (per iter1 P0 #1). Broken-folder still INFOs, never blocks claim creation. |
+| `EVAL.md` | MODIFY | Scenarios **52, 52b, 52c, 52d, 52e, 52f, 52g** — renumbered from iter2's `26-26h` per iter2 P0 #1 (collision with existing v0.3 scenario 26 "Auto-trigger: draft skip"). Update EVAL counter at bottom. |
+| `README.md` | MODIFY | One-paragraph "Code knowledge graph awareness" + short "Sharing your graph" pointer listing 3 approaches (commit / CI artifact / ExoVault) without prescribing one. Explicit Mode Y carve-out. No 50-70% token reduction claim. |
+| `.claude-plugin/plugin.json` | MODIFY | Bump `0.5.2` → `0.5.3`. |
+| `docs/superpowers/specs/2026-05-28-pr-autopilot-v0.5.3-graphify-integration.md` | NEW (this file) | Spec, iter3. |
 
-**Out of scope (v0.5.3):**
+**Out of scope (v0.5.3, deferred to v0.5.4+):**
 
-- `--force-graphify` flag
-- Auto-build of missing graph by pr-autopilot
-- Subagent graph-excerpt injection (hint only)
-- `graphify.minimumStaleness` (defer to v0.5.4; placeholder in §6.1)
-- SWE Agent direct prompt injection (Mode Y limitation; v0.5.3 only adds `@copilot` comment body augmentation)
-- Multi-repo graph merging
-- ExoVault integration to store graphs centrally
+- **Sharing recipe** (committed graph.json + git merge driver + pre/post-commit hook). Reason: iter2 recipe was empirically broken (`--no-verify` doesn't prevent post-commit recursion; verified by adversarial reviewer running it in tmp). v0.5.4 will ship a recipe AFTER we've tested a hook pattern end-to-end (with sentinel env var, doc-file detection, gitleaks integration, husky-append example, Windows PATH propagation verified).
+- **Mode Y `@copilot` comment body augmentation** (iter2 §5.2 C). Reason: speculation about SWE Agent context-reading behavior; could break Mode Y trigger (highest blast radius mode). v0.5.4 will revisit after empirical measurement.
+- **`graphify.minimumStaleness` config** — needs `state.graphifyBuiltAtCommit` infrastructure (which v0.5.3 persists for forward-compat) plus git ancestry checks. v0.5.4.
+- **Auto-build of missing graph by pr-autopilot** — cost-surprise UX risk.
+- **Subagent graph-excerpt injection** — hint only; subagent picks what to query.
+- **Multi-repo graph merging** (`graphify merge-graphs`).
+- **ExoVault integration to store graphs centrally** — Option C from sharing-model decision; multi-day build.
 
 ---
 
 ## 5. Wymagania funkcjonalne
 
-### 5.1 Pre-flight check 0.4b (Mode X step)
+### 5.1a — Pre-flight at 0.4b (BEFORE state load — NO state interaction)
 
-**Critical fix from iter1 P0 #3** (pseudocode placed before state load but used state): the check is split into two parts that run in different positions:
-
-- **§5.1a (pre-state-load filesystem check, runs at position 0.4b)** — touches NO state, only sets a local variable `_graphifyFsState`.
-- **§5.1b (post-state-load state setting + notifications, runs immediately after §0.5 Load State, as new §0.5a)** — reads `_graphifyFsState`, applies migration, sets state, emits notifications.
-
-#### §5.1a — at 0.4b, BEFORE §0.5 Load State
+Insert in `skills/step/SKILL.md` AFTER existing 0.4 (PR exists) and BEFORE 0.5 (Load State), as named anchor `0.4b`:
 
 ```bash
 # 0.4b — graphify filesystem detection (NO state interaction)
@@ -108,100 +84,105 @@ else
   _graphifyFsState="absent"
 fi
 
-# Detect merge driver gap (iter1 P0 #5 — proactive warning)
-# Only check if .gitattributes references graphify-merge AND driver isn't locally configured
-if [ -f .gitattributes ] && grep -q 'graphify-merge' .gitattributes 2>/dev/null; then
-  if ! git config --get merge.graphify-merge.driver >/dev/null 2>&1; then
-    _graphifyMergeDriverMissing="true"
-  fi
-fi
+# Capture owner/repo ONCE for reuse (iter2 P1 #5 — perf: no triple-gh-call)
+GRAPHIFY_OWNER=$(gh repo view --json owner --jq '.owner.login')
+GRAPHIFY_REPO=$(gh repo view --json name --jq '.name')
+GRAPHIFY_NOTICE_FLAG="$HOME/.pr-autopilot/${GRAPHIFY_OWNER}-${GRAPHIFY_REPO}-graphify-notice.flag"
 ```
 
-#### §5.1b — at new §0.5a, AFTER §0.5 Load State
+**No state references. No `gh pr comment`. Pure filesystem + cached owner/repo.**
+
+### 5.1b — Post-load state setting + advisory dispatch (NEW §0.5a, placed AFTER §0.6 merge-wait)
+
+**Critical placement fix from iter2 P0 #5:** §5.1b must run **AFTER §0.6 Merge-wait short-circuit**, not before. Reason: if `state.autoMergeQueued == true`, the tick is purely waiting for GitHub to complete an auto-merge — no review work happens, no subagents dispatch, the only valid next action is "check merge status." A graphify notification (or worse, PAUSE on `_graphifyFsState=broken`) during a queued-merge wait would abandon the merge completion path entirely. §5.1b therefore lives AFTER §0.6.
 
 ```python
-# 0.5a — graphify state setting + advisory notifications (REQUIRES state to be loaded)
+# §0.5a — graphify state + advisory (runs AFTER §0.6 merge-wait short-circuit, BEFORE Mode dispatch)
 
 cfg_advisory = config.graphify.advisory  # "auto" (default) | "always" | "off"
 
-# advisory=off — short-circuit, NO state interaction beyond ensuring no stale flag persists
+# ITER2 P0 #2 FIX: advisory=off short-circuits at TOP, before any filesystem dispatch
 if cfg_advisory == "off":
   state.graphifyAvailable = false
-  # fall through to next pre-flight step; nothing else to do
-else:
-  # advisory in {auto, always} — apply filesystem state
+  # Skip ALL filesystem dispatches AND the merge-driver advisory
+  goto __graphify_advisory_done__
 
-  if _graphifyFsState == "present":
+# advisory in {"auto", "always"} — apply filesystem state
+case _graphifyFsState of:
+
+  "present":
     state.graphifyAvailable = true
-    state.graphifyBuiltAtCommit = jq -r '.built_at_commit // empty' graphify-out/graph.json
-    # graphifyBuiltAtCommit MAY be empty in v0.5.3 — graphify writes it but value is empty {} on some builds (iter1 verification)
-    # v0.5.4 will add `minimumStaleness` config that uses this field; v0.5.3 only persists for forward-compat
 
-  elif _graphifyFsState == "broken":
+    # ITER2 ADVERSARIAL P0 #3 FIX: hardened jq filter with type check
+    BUILT_AT=$(jq -r 'if (.built_at_commit | type) == "string" then .built_at_commit else "" end' graphify-out/graph.json 2>/dev/null || echo "")
+    state.graphifyBuiltAtCommit = BUILT_AT
+    # graphifyBuiltAtCommit may be empty string "" (legitimate when graphify produced an empty value).
+    # NOT used to gate behavior in v0.5.3 — persisted for v0.5.4 `minimumStaleness` ancestry check.
+
+  "broken":
     state.graphifyAvailable = false
     PushNotification("PR #${prNumber} PAUSED — graphify build incomplete", "graphify-out/ exists but graph.json is missing (last `graphify extract` may have failed). Run `graphify extract . --backend deepseek` to rebuild, then re-run /pr-autopilot:step ${prNumber}.")
     saveState($STATE_FILE)
     return  # PAUSE; KEEP state
 
-  else:  # _graphifyFsState == "absent"
+  "absent":
     state.graphifyAvailable = false
     if cfg_advisory == "always":
-      PushNotification("PR #${prNumber} PAUSED — graphify required but missing", "graphify.advisory=always but no graphify-out/graph.json found. Run `/graphify .` first (~$0.05-0.15 via DeepSeek), commit graphify-out/graph.json, re-run /pr-autopilot:step ${prNumber}. To disable strict mode set graphify.advisory=auto in ~/.claude/settings.json.")
+      PushNotification("PR #${prNumber} PAUSED — graphify required but missing", "graphify.advisory=always but no graphify-out/graph.json found. Run `/graphify .` first, then re-run /pr-autopilot:step ${prNumber}. To disable strict mode set graphify.advisory=auto.")
       saveState($STATE_FILE)
       return  # PAUSE; KEEP state
-    else:  # advisory == "auto"
-      # Per-repo notice flag (NOT per-PR — fixes iter1 P1-12 "scope is wrong")
-      OWNER=$(gh repo view --json owner --jq '.owner.login')
-      REPO=$(gh repo view --json name --jq '.name')
-      NOTICE_FLAG="$HOME/.pr-autopilot/${OWNER}-${REPO}-graphify-notice.flag"
-      if [ ! -f "$NOTICE_FLAG" ]; then
-        PushNotification("INFO: graphify recommendation", "This repo has no graphify code knowledge graph. Subagents will fall back to grep + file reads. To enable token reduction: run `/graphify .` once (~$0.05-0.15 via DeepSeek), commit graphify-out/graph.json + .gitattributes. See https://github.com/MarcinSufa/claude-pr-autopilot/blob/main/docs/recipes/graphify-team-setup.md")
-        touch "$NOTICE_FLAG"
+    else:  # cfg_advisory == "auto"
+      # Per-repo notice flag (NOT per-PR — fixes iter1 P1-12)
+      if [ ! -f "$GRAPHIFY_NOTICE_FLAG" ]; then
+        PushNotification("INFO: graphify recommendation", "This repo has no graphify code knowledge graph. Run `/graphify .` once for token-reduction during PR review loops. (See README §'Code knowledge graph awareness'.)")
+        touch "$GRAPHIFY_NOTICE_FLAG"
       fi
-      # fall through; loop continues normally
+      # fall through normally — loop continues
 
-# Merge driver detection (independent advisory — applies even when graphify is enabled+present)
-if _graphifyMergeDriverMissing == "true" AND NOT state.graphifyMergeDriverWarningShown:
-  PushNotification("ADVISORY: graphify merge driver not configured", ".gitattributes references graphify-merge but `git config --get merge.graphify-merge.driver` is empty. Future merge conflicts on graph.json will fail cryptically. Run: git config merge.graphify-merge.driver \"graphify merge-driver %O %A %B\"")
-  state.graphifyMergeDriverWarningShown = true
-  saveState($STATE_FILE)
+# ITER2 ADVERSARIAL P1 #1 FIX: merge-driver advisory now ALSO gated behind `cfg_advisory != "off"`
+# (placed INSIDE the non-off branch via goto exit point)
+
+__graphify_advisory_done__:
 ```
 
-**State schema bump v3 → v4** (per iter1 P0 #2 + iter1 P1-5):
+**State schema bump v3 → v4** (iter2 P0 #2 fix — explicit position in SKILL.md):
 
-Add to the "Key changes" subsection of `skills/step/SKILL.md` (line ~261-271):
+In `skills/step/SKILL.md` section "Key changes from v0.1 state" (~line 261-271), insert a new bullet **between** the existing v0.4 auto-merge fields bullet and the `resolvedMode` bullet:
 
-> - `stateSchemaVersion: 4` (v0.5.3) — additive fields: `graphifyAvailable: false`, `graphifyBuiltAtCommit: ""`, `graphifyMergeDriverWarningShown: false`. Migration: a v3 state file loads with all four fields defaulted (`false`/`""`); no fresh start needed. Per-repo notice flag at `$HOME/.pr-autopilot/<owner>-<repo>-graphify-notice.flag` is independent of per-PR state. The `state.stateSchemaVersion is None` Mode-Y ABORT guard (Y.0.5) is unaffected since v3→v4 is additive only.
+> - **Graphify awareness fields (v0.5.3, schema v4):** `graphifyAvailable: false`, `graphifyBuiltAtCommit: ""` — set by new §0.5a check. Migration is purely additive: a v3 state file loads with both defaulted; no fresh start needed. The `state.stateSchemaVersion is None` Mode-Y ABORT guard (Y.0.5) is unaffected — v3→v4 is additive only, the guard fires on field absent, not on field value.
+
+Update the JSON schema example block (~lines 221-258) to `"stateSchemaVersion": 4`.
 
 ### 5.1c — Variant for `/pr-autopilot:assign` (ALWAYS ADVISORY, NEVER PAUSE)
-
-**Critical fix from iter1 P0 #1** (assign violates "never blocks claim file creation" contract):
 
 In `skills/assign/SKILL.md`, BEFORE creating the claim file:
 
 ```bash
-# Filesystem check only — assign uses an INFO notification for ANY graphify state, never PAUSE
+# Filesystem-only check; assign uses INFO for ANY graphify state, never PAUSE
+GRAPHIFY_OWNER=$(gh repo view --json owner --jq '.owner.login')
+GRAPHIFY_REPO=$(gh repo view --json name --jq '.name')
+GRAPHIFY_NOTICE_FLAG="$HOME/.pr-autopilot/${GRAPHIFY_OWNER}-${GRAPHIFY_REPO}-graphify-notice.flag"
+
 if [ -f "graphify-out/graph.json" ]; then
   : # silent; no notification
 elif [ -d "graphify-out" ]; then
-  echo "[INFO] graphify-out/ exists but graph.json missing. Run 'graphify extract .' to rebuild for token-reduction benefits during /pr-autopilot:step. (advisory only; claim file will be created.)"
+  # Broken folder still INFOs in /assign (iter2 P1 #7 — rationale documented)
+  # Rationale: broken-folder in /assign INFOs because blocking claim creation is worse
+  # than proceeding without graph hints. /step PAUSEs because loop progress with stale
+  # state would be misleading.
+  echo "[INFO] graphify-out/ exists but graph.json missing. Run 'graphify extract .' to rebuild for token-reduction during /pr-autopilot:step. (advisory only; claim file will be created.)"
 else
-  # Honor per-repo notice flag (same flag as /step uses; if /step already INFO'd, /assign stays silent)
-  OWNER=$(gh repo view --json owner --jq '.owner.login')
-  REPO=$(gh repo view --json name --jq '.name')
-  NOTICE_FLAG="$HOME/.pr-autopilot/${OWNER}-${REPO}-graphify-notice.flag"
-  if [ ! -f "$NOTICE_FLAG" ]; then
-    echo "[INFO] This repo has no graphify code knowledge graph. Run /graphify . once for token reduction during PR review loops. (advisory only.)"
-    touch "$NOTICE_FLAG"
+  # Honor per-repo notice flag (same flag /step uses)
+  if [ ! -f "$GRAPHIFY_NOTICE_FLAG" ]; then
+    echo "[INFO] This repo has no graphify code knowledge graph. Run /graphify . once for token-reduction during PR review loops. (advisory only.)"
+    touch "$GRAPHIFY_NOTICE_FLAG"
   fi
 fi
 
-# Continue claim file creation regardless — graphify state never blocks /assign
+# Continue claim file creation regardless
 ```
 
-### 5.1d — Variant for `/pr-autopilot:review-spec` (DISPATCH-TIME FILESYSTEM CHECK, NO STATE)
-
-**Critical fix from iter1 P0 #4** (`/review-spec` bootstrap has no per-PR state file):
+### 5.1d — Variant for `/pr-autopilot:review-spec` (DISPATCH-TIME FILESYSTEM CHECK)
 
 In `skills/review-spec/SKILL.md`, just before "Step 2 — dispatch sync adapters in parallel":
 
@@ -214,15 +195,11 @@ else
 fi
 ```
 
-This `_graphifyHintEnabled` is consumed by the prompt templates in §5.2.
-
-### 5.2 Subagent prompt + main-loop hint injection
-
-**Critical fix from iter1 P0 #5** (Step 10 triage is in-process loop driver, NOT subagent dispatch). Hint goes into THREE distinct injection points:
+### 5.2 Prompt hint injection (two sites; Mode Y `@copilot` comment body DROPPED)
 
 #### A) `/review-spec` adapter prompt templates (REAL subagent dispatch)
 
-When `_graphifyHintEnabled == "true"` (set in §5.1d), prepend the following to each adapter prompt in `skills/review-spec/SKILL.md` (claude-code-reviewer-subagent + claude-self-review templates):
+When `_graphifyHintEnabled == "true"` (set in §5.1d), **prepend** to each adapter prompt in `skills/review-spec/SKILL.md` (claude-code-reviewer-subagent + claude-self-review templates):
 
 ```
 **Code knowledge graph available:** This repo has a graphify-built knowledge graph at
@@ -230,37 +207,25 @@ When `_graphifyHintEnabled == "true"` (set in §5.1d), prepend the following to 
 the graph: `graphify explain "<symbol>"` returns the node + connections + community
 in ~1-3k tokens vs ~30-100k for a multi-file grep. Use `graphify path "A" "B"` for
 dependency-trace. If `graphify` errors with "command not found" (CLI not installed
-locally), fall back to grep + Read without retrying graphify.
+locally), fall back to grep + Read without retrying.
 ```
 
-**Placement note (per iter1 P1-7 "prepend > append" critique):** The hint is placed BEFORE the task description, not at the end. Anthropic's documented recommendation for long contexts is to place instructions at the END (recency); for short subagent prompts (~150 tokens), placement effect is empirically uncertain. We use prepend by default; if iter3+ A/B testing shows append is more reliable for this prompt shape, swap via `graphify.promptHintPosition` config (added in that revision).
+**Placement: prepend** — adapter prompts are ~100 tokens; primacy/recency effects are negligible at this scale. Empirical verification deferred to v0.5.4.
 
 #### B) `/pr-autopilot:step` Mode X step 10 triage **preamble** (in-process main-loop driver)
 
-When `state.graphifyAvailable == true`, modify Step 10 in `skills/step/SKILL.md` to insert a preamble line at the start of the triage section, BEFORE invoking `REVIEW-TRIAGE-COPY.md`:
+**Critical fix from iter1 P0 #5 (in-process, not subagent dispatch).** **Placement APPEND, not prepend** (iter2 adversarial P1 #7 — long-context Anthropic recommendation).
+
+When `state.graphifyAvailable == true` AND `config.graphify.promptHint == true` (iter2 P1 #9 fix — both injection sites honor `promptHint`), append to Step 10 triage section AFTER the existing rubric + unresolved-threads block, BEFORE the final decision section:
 
 ```
-**Pre-triage note (v0.5.3+):** This repo has a graphify code knowledge graph at
-`graphify-out/graph.json`. When judging whether a reviewer comment about symbol X is
-valid, query `graphify explain "X"` first to see X's connections/community; query
+**Graphify reminder (v0.5.3+):** Before judging reviewer comments about symbol X,
+query `graphify explain "X"` to see X's connections/community. Query
 `graphify path "X" "Y"` for dependency-validity questions. Only `Read` source files
 when graphify returns insufficient context.
 ```
 
-This is consumed by Claude (the loop driver), NOT a dispatched subagent.
-
-#### C) Mode X step 5.5 `@copilot` comment body augmentation (Mode Y fixer hint via Copilot SWE Agent)
-
-**Critical fix from iter1 P1-8** (Mode Y was abandoned; SWE Agent reads PR comments). When `state.graphifyAvailable == true` and triggering `@copilot please review`, append the following to the comment body posted via `gh pr comment`:
-
-```
-P.S. This repo has a code knowledge graph at `graphify-out/graph.json`. Prefer
-`graphify explain "<symbol>"` over grep when investigating symbols.
-```
-
-Three sentences, ~30 tokens. If SWE Agent reads PR comments (documented behavior for issue-comment-triggered runs), the hint reaches Copilot's primary fixer path.
-
-### 5.3 Config schema (revised per iter1)
+### 5.3 Config schema
 
 Add to `~/.claude/settings.json` `prAutopilot` block:
 
@@ -273,256 +238,158 @@ Add to `~/.claude/settings.json` `prAutopilot` block:
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `advisory` | enum `"auto" \| "always" \| "off"` | `"auto"` | Three explicit modes. `auto` = check + INFO once per repo if missing, continue. `always` = check + PAUSE if missing. `off` = skip the check entirely (no notifications, no state interaction beyond ensuring `state.graphifyAvailable=false`). |
-| `promptHint` | bool | `true` | Whether to prepend the graphify hint to `/review-spec` subagent prompts AND to `/step` step 10 preamble. Set `false` to disable instruction injection but keep the pre-flight detection (mainly useful for power users measuring baseline-vs-hinted behavior). |
+| `advisory` | enum `"auto" \| "always" \| "off"` | `"auto"` | `auto` = check + INFO once per repo if missing, continue. `always` = check + PAUSE if missing. `off` = skip the check entirely. |
+| `promptHint` | bool | `true` | Whether to inject the graphify hint into `/review-spec` subagent prompts AND `/step` step 10 triage preamble. Set `false` to keep detection but disable instruction injection (e.g., for baseline measurement). |
 
-**Per iter1 P1-4:** `minimumStaleness` is REMOVED from v0.5.3. Defer to v0.5.4 when staleness-checking infrastructure is designed (requires git ancestry checks against `built_at_commit`, which can be empty `""` in current graphify builds).
+**Pattern divergence from existing reviewer keys is intentional:** `cursor.enabled` / `copilot.mode` / `claudeSelf.enabled` are explicit declarations. `graphify.advisory` is a policy on filesystem auto-detection. Documented.
 
-**Per iter1 P1 (config inconsistency with cursor/copilot):** The `enabled=true|false` pattern used by other reviewers doesn't fit here — graphify is detected from filesystem (`graph.json` exists or doesn't), not declared in config. The `advisory` enum names the policy applied to that detection. Documented intentional deviation.
+### 5.4 Sharing your graph (README pointer; **NOT a prescribed recipe**)
 
-### 5.4 Recipe doc: `docs/recipes/graphify-team-setup.md`
+In `README.md`, add a paragraph under "How it works" or as a new subsection:
 
-**Revised per iter1 P0 #4 (gitignore), P0 #5 (hook failure handling), P1-1 (post-commit upstream alignment), P1-2 (merge driver NOT auto-installed), P1-6 (security), P1-9 (regex portability), P1-11 (husky append).**
+> **Sharing the graph across teammates:** `graphify-out/graph.json` is portable (relative paths only) but per-machine by default. Three approaches, ordered by simplicity:
+>
+> 1. **Commit to repo + git merge driver** — simplest for small teams. `graphify-out/graph.json` is committed; `.gitattributes` registers graphify's `merge-driver` for conflict resolution. **Hook pattern for auto-refresh on commit is intentionally not prescribed by v0.5.3** — iter2 testing showed naive post-commit auto-amend recurses infinitely (`--no-verify` doesn't skip post-commit hooks). v0.5.4 will ship a tested hook pattern. For now: refresh manually with `graphify update .` when needed.
+> 2. **CI artifact + GitHub Release** — works at any team size. GH Action runs `graphify extract . --backend deepseek` on main merges, uploads as a release artifact. Teammates download via `gh release download`. ~3-5h CI setup.
+> 3. **ExoVault or other vault** — long-term architectural option. Net-new vault feature; multi-day build. Best for organizations that already use a centralized vault and want unified code + decision memory.
+>
+> v0.5.3 doesn't prescribe an approach — pick what fits your team. Pre-flight `state.graphifyAvailable` detection works regardless of source.
 
-Step-by-step adoption guide. Outline (numbers reused for traceability):
+### 5.5 Mode Y limitation
 
-1. **Install graphify CLI** (uv tool install graphifyy + DEEPSEEK_API_KEY or other supported backend in user env)
-2. **First-time build**: `graphify extract . --backend deepseek` (~$0.05-0.15, ~90s for ~200-file repo)
-3. **Verify portability (bash):**
-   ```bash
-   jq -r '.. | strings? | select(test("^[A-Z]:\\\\|^/home/|^/Users/"))' graphify-out/graph.json | head -3
-   ```
-   **Expected: no output.** If any line prints, your graph contains absolute paths — file an issue at graphify repo.
+Mode Y (Copilot SWE Agent as primary fixer) dispatches via `@copilot` mention. **v0.5.3 does NOT modify the `@copilot` comment body** (iter2 P0 #6 — appending a P.S. could break Mode Y trigger; SWE Agent might parse it as user-injected instruction and refuse). Mode Y users get NO graphify hint via pr-autopilot in v0.5.3.
 
-   **Windows PowerShell variant:**
-   ```powershell
-   jq -r '.. | strings? | select(test(\"^[A-Z]:\\\\\\\\|^/home/|^/Users/\"))' graphify-out/graph.json | Select-Object -First 3
-   ```
+**Workaround for Mode Y users:** add the graphify hint to your repo's `AGENTS.md` or `CLAUDE.md` — SWE Agent reads those on PR-trigger (documented behavior). Example:
 
-4. **Verify secret-cleanness (initial portability check, NOT a substitute for ongoing scans):**
-   ```bash
-   jq -r '.. | strings? | select(test("^(sk-|ghp_|gho_|github_pat_|AKIA|eyJ[A-Za-z0-9_-]+)"))' graphify-out/graph.json | head -3
-   ```
-   **Expected: no output.** Note: this regex is a coarse first pass. It does NOT detect JWT without `eyJ` prefix, raw Bearer tokens, connection strings, or PEM blocks. ADD a mandatory git-secrets / gitleaks pre-commit scan per step 8.
+```
+This repo has a graphify code knowledge graph at `graphify-out/graph.json`.
+Prefer `graphify explain "<symbol>"` over grep when investigating symbols.
+```
 
-5. **Update `.gitignore`** — use **WHITELIST pattern** (defensive against future graphify version adding new artifact types):
-   ```gitignore
-   graphify-out/*
-   !graphify-out/graph.json
-   ```
-   This excludes `graphify-out/cache/`, `graphify-out/manifest.json`, `graphify-out/.graphify_analysis.json`, `graphify-out/.graphify_semantic_marker`, `graphify-out/2026-*/`, and any future per-machine artifacts — only `graph.json` itself is committed.
-
-6. **`.gitattributes`** — register both the merge driver and lockfile-style diff hiding:
-   ```gitattributes
-   graphify-out/graph.json merge=graphify-merge linguist-generated=true
-   ```
-   The `linguist-generated=true` directive tells GitHub to auto-collapse the diff in PR reviews (same mechanism as `package-lock.json`).
-
-7. **Install local merge driver** (REQUIRED per clone; graphify v0.8.22 `hook install` does NOT do this — verified against safishamsi/graphify@v0.8.22 source):
-   ```bash
-   git config merge.graphify-merge.driver "graphify merge-driver %O %A %B"
-   ```
-   **Onboarding note for teammates:** include this in your repo's onboarding checklist. pr-autopilot v0.5.3+ detects this gap via §5.1a `_graphifyMergeDriverMissing` check and warns proactively.
-
-8. **Post-commit hook** (matches upstream graphify hook model per iter1 P1-1):
-
-   **Fresh install** (no existing hook):
-   ```bash
-   # .git/hooks/post-commit (chmod +x)
-   #!/usr/bin/env bash
-   # Refresh graphify graph after every commit (incremental, no LLM, ~1-3s)
-   # Graceful degrade: never block the commit flow (post-commit can't anyway)
-   graphify update . >/dev/null 2>&1 || true
-   if ! git diff --quiet HEAD -- graphify-out/graph.json 2>/dev/null; then
-     # graph.json changed — stage + amend to include it in the current commit
-     # (post-commit amend; teammate sees one combined commit, not a fixup)
-     git add graphify-out/graph.json && git commit --amend --no-edit --no-verify >/dev/null 2>&1 || true
-   fi
-   ```
-
-   **Husky append** (existing husky setup with `.husky/post-commit`):
-   ```bash
-   # Append to .husky/post-commit
-   cat >> .husky/post-commit <<'EOF'
-   graphify update . >/dev/null 2>&1 || true
-   if ! git diff --quiet HEAD -- graphify-out/graph.json 2>/dev/null; then
-     git add graphify-out/graph.json && git commit --amend --no-edit --no-verify >/dev/null 2>&1 || true
-   fi
-   EOF
-   ```
-
-   **Why post-commit not pre-commit:** Upstream graphify v0.8.22 uses post-commit hook (verified in `safishamsi/graphify` source). Post-commit is decoupled — never blocks the user's commit. Pre-commit would block on graphify CLI errors / parse errors / PATH issues.
-
-   **Why `--no-verify` on the amend:** prevents recursive post-commit hook firing on the amend itself.
-
-   **MANDATORY security companion** (per iter1 P1-6): add a SEPARATE pre-commit hook that scans the staged diff for secrets using `gitleaks` or `git-secrets`. The graphify hook updates graph.json AFTER the user's content commits; secret scanning must happen BEFORE that content lands. Document both hooks together; never bundle them.
-
-9. **Initial commit**:
-   ```bash
-   git add graphify-out/graph.json .gitignore .gitattributes
-   git commit -m "chore: add graphify code knowledge graph (initial build)"
-   ```
-
-10. **Teammate onboarding** — one-time per clone:
-    - `uv tool install graphifyy` (CLI; needed for merge driver + post-commit hook)
-    - `git config merge.graphify-merge.driver "graphify merge-driver %O %A %B"` (manual; not in `.gitattributes`)
-    - Set `DEEPSEEK_API_KEY` (or other supported backend) in user env scope — only needed for explicit full re-extract via `graphify extract . --backend deepseek`; `graphify update .` (post-commit hook) is free.
-
-The recipe is **decoupled from pr-autopilot** — useful for any team adopting graphify even without pr-autopilot.
-
-### 5.5 Mode Y / Copilot SWE Agent integration
-
-**Revised per iter1 P1-8:** Mode Y is NOT abandoned. SWE Agent reads PR comments (documented behavior). v0.5.3 adds two Mode-Y-applicable hints:
-
-1. **Repo `AGENTS.md` recommendation** — recipe (§5.4) Step 11 (new): "If your repo uses Copilot SWE Agent (Mode Y in pr-autopilot config OR direct GitHub Copilot usage), add to your repo's `AGENTS.md` or `CLAUDE.md`: `'This repo has a graphify code knowledge graph at graphify-out/graph.json. Prefer `graphify explain "<symbol>"` over grep when investigating symbols.'`" — SWE Agent will read this on PR-trigger.
-
-2. **`@copilot` comment body augmentation** — pr-autopilot Mode X step 5.5 + Mode Y trigger comments append a P.S. hint when `state.graphifyAvailable == true` (per §5.2 part C).
-
-**True SWE Agent internal-prompt modification remains out-of-control** (GitHub's SDK; v0.5.3 cannot directly inject into SWE Agent's reasoning). README explicit Mode Y carve-out (per iter1 P1-8 README oversell).
+Direct `@copilot` comment body augmentation deferred to v0.5.4 after empirical measurement of SWE Agent's response.
 
 ### 5.6 Stop conditions (revised)
 
 | Condition | Step | Outcome |
 |---|---|---|
-| `advisory=off` AND any filesystem state | 0.4b/0.5a | PASS (no notification, `state.graphifyAvailable=false`) |
-| `advisory=auto` AND `graph.json` present | 0.4b/0.5a | PASS (silent, `state.graphifyAvailable=true`) |
-| `advisory=auto` AND `graph.json` absent (no folder) | 0.5a | INFO once per repo (notice flag), continue |
-| `advisory=auto` AND `graphify-out/` exists but no `graph.json` (broken) | 0.5a | PAUSE (KEEP state, rebuild message) |
-| `advisory=always` AND `graph.json` absent | 0.5a | PAUSE (KEEP state, strict-mode message) |
-| `advisory=always` AND broken folder | 0.5a | PAUSE (KEEP state, rebuild message) |
-| `.gitattributes` has graphify-merge AND driver not configured | 0.5a | ADVISORY once per repo (via separate flag), continue |
+| `advisory=off` AND any filesystem state | §0.5a | PASS (no notification, `state.graphifyAvailable=false`) |
+| `state.autoMergeQueued=true` (queued-merge wait) | §0.6 short-circuits BEFORE §0.5a fires | §5.1b never runs; merge wait proceeds normally |
+| `advisory=auto` AND `graph.json` present | §0.5a | PASS (silent, `state.graphifyAvailable=true`) |
+| `advisory=auto` AND `graph.json` absent (no folder) | §0.5a | INFO once per repo (notice flag), continue |
+| `advisory=auto` AND broken folder | §0.5a | PAUSE (KEEP state, rebuild message) |
+| `advisory=always` AND `graph.json` absent | §0.5a | PAUSE (KEEP state, strict-mode message) |
+| `advisory=always` AND broken folder | §0.5a | PAUSE (KEEP state, rebuild message) |
 
-**Update existing "Stop conditions summary" table** in `skills/step/SKILL.md` line 1029-1056 with the rows above.
+Add these rows to "Stop conditions summary" in `skills/step/SKILL.md` lines 1029-1056.
 
-### 5.7 README change (revised — Mode Y carve-out + claim toned down)
+### 5.7 README change
 
 Add a paragraph under "How it works":
 
-> **Code knowledge graph awareness (v0.5.3+):** If your repo has a graphify-built knowledge graph at `graphify-out/graph.json`, pr-autopilot's dispatched `/review-spec` subagents and the in-loop `/step` triage will prefer querying the graph over grep'ing source files for symbol-lookup questions. When Mode X triggers Copilot Code Review (step 5.5), the `@copilot` comment includes a graphify P.S. hint. **Mode Y limitation:** Copilot SWE Agent's internal prompt is GitHub-controlled — pr-autopilot can only nudge it via the `@copilot` comment body and the recipe's `AGENTS.md` snippet, not directly modify SWE Agent's reasoning. Token reduction is **expected; not yet measured** — see EVAL scenario 26 for the planned baseline measurement. Setup recipe: [Graphify team setup](docs/recipes/graphify-team-setup.md).
+> **Code knowledge graph awareness (v0.5.3+):** If your repo has a graphify-built knowledge graph at `graphify-out/graph.json`, pr-autopilot's dispatched `/review-spec` subagents and the in-loop `/step` triage will prefer querying the graph (`graphify explain "<symbol>"`) over grep'ing source files for symbol-lookup questions. **Mode Y limitation:** Copilot SWE Agent's prompt is GitHub-controlled — v0.5.3 does not augment SWE Agent's context; add the graphify hint to your repo's `AGENTS.md` or `CLAUDE.md` instead. **Token reduction expected but not yet measured** — see EVAL scenario 52 baseline. **Sharing the graph across teammates:** see §"Sharing your graph" subsection below for 3 approaches.
 
 ---
 
-## 6. Edge cases + open questions (revised)
+## 6. Edge cases (reduced after scope drop)
 
 ### 6.1 Graph staleness vs HEAD
 
-`state.graphifyBuiltAtCommit` is persisted in v0.5.3 state for forward-compat. v0.5.4 will add `graphify.minimumStaleness` config that uses `git merge-base --is-ancestor <built_at_commit> HEAD` for real ancestry checks. **In v0.5.3, staleness is not checked.** Recipe's post-commit hook is the freshness mechanism.
+`state.graphifyBuiltAtCommit` is persisted in v0.5.3 state for forward-compat. v0.5.4 will add `graphify.minimumStaleness` config using `git merge-base --is-ancestor <built_at_commit> HEAD`. **v0.5.3 does not check staleness.**
 
-### 6.2 Worktree + assign edge case (iter1 P1-9)
+### 6.2 Worktree + assign edge case
 
-`/assign` creates worktree from `origin/main`. If `graphify-out/graph.json` was committed AFTER the worktree-base commit, the worktree won't have it. Pre-flight 0.5a checks the WORKTREE root (current CWD). Mitigation: recipe step 9 ("initial commit") MUST be done before `/assign` workflows; if not, the assign worktree will INFO ("no graph") but main has one — minor UX confusion, acceptable for v0.5.3. Documented in recipe.
+`/assign` creates worktree from `origin/main`. If `graphify-out/graph.json` is on main but the worktree was created at an older commit, the worktree won't have it. Pre-flight `_graphifyFsState=absent` triggers the INFO notification. Mitigation: refresh worktree from `git pull origin main` after `/assign`. Documented in §5.4 README pointer.
 
 ### 6.3 graphify CLI missing on user's machine
 
-Subagent hint says `graphify explain X` — if CLI not installed, errors with exit 127. The hint explicitly says "fall back to grep + Read without retrying graphify." EVAL scenario 26f tests this fallback.
+Subagent hint says `graphify explain X` — if CLI errors with exit 127, the hint explicitly says "fall back to grep + Read without retrying." EVAL scenario 52f tests this.
 
-### 6.4 Mode Y limitation (revised — now partial)
+### 6.4 Mode Y limitation (now bounded)
 
-v0.5.3 provides TWO Mode Y hint paths (`AGENTS.md` snippet via recipe + `@copilot` comment body augmentation via §5.2 C). Neither modifies SWE Agent's internal prompt — that remains out of scope. Documented in README + recipe.
-
-### 6.5 graph.json grows over time
-
-Recipe documents `linguist-generated=true` in `.gitattributes` for GitHub PR diff collapsing. Per iter1 P2 #8 + adversarial P1-10 critique: **no hard file-count threshold given**. Recommend: `ls -lh graphify-out/graph.json` periodically; consider LFS if it exceeds ~50MB (real measurement, not extrapolation).
-
-### 6.6 Pre-commit hook conflicts with existing hooks
-
-Recipe step 8 shows BOTH fresh-install AND husky-append patterns explicitly (iter1 P1-11 fix). The recipe uses **post-commit** (not pre-commit) per iter1 P1-1, matching upstream graphify v0.8.22 hook model.
-
-### 6.7 graphify merge driver requires graphify CLI installed locally
-
-Recipe step 7 marks merge driver setup as REQUIRED PER CLONE. Pre-flight 0.5a detects the gap (`_graphifyMergeDriverMissing`) and warns ONCE per repo via separate flag `state.graphifyMergeDriverWarningShown`.
-
-### 6.8 graph.json security across versions (iter1 P1-6 NEW)
-
-Future graphify versions may add fields (semantic enrichment text from comments/docstrings, MCP config labels, etc.) that could leak content. Recipe MANDATES:
-- One-time pre-commit secret scan (recipe step 4 regex is a coarse first pass, NOT exhaustive)
-- ONGOING gitleaks/git-secrets pre-commit hook (separate from graphify hook; documented in recipe step 8)
-- "Rotate if leaked" playbook in recipe step 12 (new — link to your team's secret-rotation runbook)
-
-The spec does NOT claim "perpetually secret-clean" — the user's secret-scanning hygiene is the load-bearing defense, not the spec.
+v0.5.3 provides NO Mode Y hint path beyond the manual `AGENTS.md` recommendation in §5.5 workaround. Documented in README + §5.5.
 
 ---
 
-## 7. Test plan (EVAL.md scenarios — revised + expanded per iter1 P1-7)
+## 7. Test plan (EVAL.md scenarios — RENUMBERED 52-52g per iter2 P0 #1)
 
-**Scenario 26 — happy path, graph present**
+**Critical fix from iter2 P0 #1:** EVAL.md already defines scenario 26 (v0.3 "Auto-trigger: draft skip"). v0.5.3 graphify scenarios renumber to 52-52g (next available after the existing 50b/51/variants). Update EVAL.md counter at bottom (e.g., "54 total" → "61 total" — implementer verifies exact starting count).
+
+**Scenario 52 — happy path, graph present**
 - Setup: Asistel-like repo with `graphify-out/graph.json` committed. Config defaults.
-- Expected: 0.4b sets `_graphifyFsState=present`; 0.5a sets `state.graphifyAvailable=true`, silent; subagent prompts include hint; Mode X step 5.5 `@copilot` comment includes P.S.
+- Expected: §0.4b sets `_graphifyFsState=present`; §0.5a sets `state.graphifyAvailable=true`, silent; subagent prompts in `/review-spec` include hint; `/step` step 10 triage preamble includes hint.
 
-**Scenario 26b — `advisory=auto` (default), graph missing**
+**Scenario 52b — `advisory=auto` (default), graph missing, first PR in repo**
 - Setup: PR in repo without `graphify-out/`. Config defaults.
-- Expected: 0.5a sets `state.graphifyAvailable=false`; per-repo notice flag created at `$HOME/.pr-autopilot/<owner>-<repo>-graphify-notice.flag`; INFO notification fires ONCE; loop continues; subagent prompts do NOT include hint.
+- Expected: §0.5a sets `state.graphifyAvailable=false`; per-repo notice flag created; INFO notification fires ONCE; loop continues; subagent prompts do NOT include hint.
 
-**Scenario 26b-bis — `advisory=auto`, graph missing, second PR same repo**
-- Setup: same repo as 26b, second PR opened, flag exists from 26b.
-- Expected: 0.5a does NOT re-notify (flag present); loop continues; subagent prompts do NOT include hint.
+**Scenario 52b-bis — same repo, second PR (flag already exists)**
+- Setup: same repo as 52b, second PR opened, flag from 52b present.
+- Expected: §0.5a does NOT re-notify; loop continues normally.
 
-**Scenario 26c — `advisory=always`, graph missing**
+**Scenario 52c — `advisory=always`, graph missing**
 - Setup: PR in repo without `graphify-out/`. Config: `graphify.advisory=always`.
-- Expected: 0.5a PAUSEs with actionable message; KEEP state.
+- Expected: §0.5a PAUSEs with actionable message; KEEP state.
 
-**Scenario 26d — broken folder (graphify-out/ exists, no graph.json), in /step**
-- Setup: PR in repo with `graphify-out/cache/` but no `graphify-out/graph.json`.
-- Expected: 0.5a PAUSEs with rebuild message regardless of `advisory` setting.
+**Scenario 52d — broken folder, in `/step`**
+- Setup: PR in repo with `graphify-out/cache/` but no `graphify-out/graph.json`. Config: any advisory.
+- Expected: §0.5a PAUSEs with rebuild message (regardless of `auto`/`always`; only `off` skips).
 
-**Scenario 26e — `advisory=off`**
+**Scenario 52e — `advisory=off`**
 - Setup: PR in repo WITHOUT `graphify-out/`. Config: `graphify.advisory=off`.
-- Expected: 0.5a sets `state.graphifyAvailable=false`, no notification, loop continues normally, subagent prompts do NOT include hint.
+- Expected: §0.5a short-circuits at top, no notification, loop continues. Subagent prompts do NOT include hint.
 
-**Scenario 26f — graph committed, CLI not installed locally**
-- Setup: PR in repo with `graphify-out/graph.json` but teammate hasn't run `uv tool install graphifyy`.
-- Expected: 0.5a passes (file present); subagent gets hint; subagent's `graphify explain X` call errors with exit 127; subagent falls back to grep + Read; review proceeds.
+**Scenario 52e-bis — `advisory=off` + broken folder (iter2 P0 #2 regression test)**
+- Setup: PR in repo with `graphify-out/cache/` but no `graphify-out/graph.json`. Config: `graphify.advisory=off`.
+- Expected: §0.5a short-circuits at top (advisory=off branch FIRST); broken folder is NOT checked; loop continues silently. **Validates the iter2 P0 #2 fix — advisory=off does NOT PAUSE on broken folder.**
 
-**Scenario 26g — merge driver gap detection**
-- Setup: PR in repo with `.gitattributes` containing `graphify-merge` but `git config merge.graphify-merge.driver` not set.
-- Expected: 0.5a sets `state.graphifyMergeDriverWarningShown=true`, ADVISORY notification fires ONCE; loop continues.
+**Scenario 52f — graph committed, CLI not installed locally**
+- Setup: PR in repo with `graphify-out/graph.json` but teammate hasn't installed graphify CLI.
+- Expected: §0.5a passes (file present); subagent gets hint; subagent's `graphify explain X` errors with exit 127; subagent falls back to grep + Read; review proceeds.
 
-**Scenario 26h — `/assign` with broken folder**
+**Scenario 52g — `/assign` with broken folder (iter1 P0 #1 regression test)**
 - Setup: Run `/pr-autopilot:assign <id>` in repo with `graphify-out/cache/` but no `graphify-out/graph.json`.
-- Expected: INFO message printed (NOT PAUSE), claim file created normally. Per iter1 P0 #1 ("assign never blocks").
+- Expected: INFO message echoed (NOT PAUSE), claim file created normally. **Validates the iter1 P0 #1 fix — `/assign` is always advisory.**
+
+**Scenario 52h — queued-merge wait + graphify state change (iter2 adversarial P0 #5 regression test)**
+- Setup: PR with `state.autoMergeQueued=true` (queued by prior tick); user breaks `graphify-out/` between ticks.
+- Expected: §0.6 merge-wait short-circuit fires BEFORE §5.1b is reached; merge wait proceeds normally; no graphify notification interrupts the queued-merge resume. **Validates §0.5a placement AFTER §0.6.**
 
 Each scenario gated for v0.5.3 release.
 
 ---
 
-## 8. Risks + open questions for review (revised)
+## 8. Risks + open questions for review (revised after scope drop)
 
-| # | Risk | Mitigation in spec | Open question? |
+| # | Risk | Mitigation in spec | Open? |
 |---|---|---|---|
-| R1 | Subagent ignores hint, still greps | EVAL scenario 26f tests fallback explicitly; hint also gives explicit fall-back instruction | Low |
-| R2 | Recipe drifts from upstream graphify | Pinned to v0.8.22 verified against source (NOT just changelog per iter1 P1-2) | Low |
-| R3 | Teammate-without-CLI hits merge driver gap | Pre-flight 0.5a detects + warns proactively (§5.1b) per iter1 P0 #5 | Mitigated |
-| R4 | Post-commit hook is silent on graphify CLI errors | `|| true` graceful degrade is intentional; recipe documents the trade-off | Low |
-| R5 | Subagent's graphify call fails silently | EVAL 26f explicit; hint includes fall-back instruction | Mitigated |
-| R6 | graph.json diff noise in PR reviews | `linguist-generated=true` in `.gitattributes` (recipe step 6) — GitHub auto-collapses | Resolved |
-| R7 | graph.json secrets across versions | Recipe MANDATES ongoing gitleaks/git-secrets pre-commit + initial portability scan (§6.8) | Open — depends on user's secret hygiene |
-| R8 | Mode Y SWE Agent ignores `@copilot` comment hint | Empirically unverified; v0.5.4 will measure by counting graphify invocations in SWE Agent comments | Open |
-| R9 | iter1 cursor cloud token cost (1.5M) | v0.5.3 itself doesn't fix; logged as v0.5.4 candidate ("cursor cost reduction in `/review-spec`") | Open — separate spec |
-| R10 | "Prepend > append" empirical uncertainty | §5.2 explicitly labels as default-with-future-flag; v0.5.4 may add `graphify.promptHintPosition` | Open — measurement plan in EVAL 26 baseline |
+| R1 | Subagent ignores hint, still greps | Hint includes explicit fall-back; EVAL 52f tests it | Low |
+| R2 | Graphify CLI not on teammate's PATH | Subagent fallback (R1) covers; v0.5.4 may add detection | Low |
+| R3 | Mode Y users get no benefit | Documented in §5.5 + README; manual `AGENTS.md` workaround | Open — v0.5.4 measurement |
+| R4 | Anthropic prepend-vs-append empirical uncertainty | A) short adapter prompts: prepend OK. B) long triage preamble: APPEND per Anthropic recommendation | Mitigated |
+| R5 | Recipe-related risks (auto-amend, gitleaks, etc.) | **Out of scope — recipe dropped from v0.5.3** | N/A |
+| R6 | Mode Y `@copilot` augmentation broke trigger | **Out of scope — augmentation dropped from v0.5.3** | N/A |
 
 ---
 
 ## 9. Open questions for the reviewer
 
-1. **§5.1b state schema bump v3 → v4** — additive-only migration. Should the migration block be inserted inline at "Key changes from v0.1 state" subsection, or as a new "Migration v3 → v4" subsection mirroring how v0.4 documented its bump?
-2. **§5.2 C `@copilot` comment body augmentation** — is appending a P.S. acceptable in the existing comment flow, or does it risk SWE Agent misinterpreting the augmentation as part of the trigger directive? Recommend low-risk; verify empirically in EVAL.
-3. **§5.4 step 8 post-commit `--amend`** — the auto-amend pattern is contentious. Alternative: emit a "graphify update available; run `git commit --amend` to include" message and let user opt in. Recommend auto-amend with `--no-verify` for minimum friction; reviewer should validate.
-4. **§6.8 security boundary** — is "user's gitleaks hygiene is the load-bearing defense" an acceptable shipped position, or should v0.5.3 ship its own pre-commit secret scan as part of the recipe?
+1. **§5.1b placement AFTER §0.6 merge-wait** — confirm that §5.1b runs at "post-merge-wait but pre-Mode-dispatch" position. Should it be its own §0.6a or labeled differently to make placement unambiguous?
+2. **State schema bump documentation** — §5.1b shows the new bullet text but not the exact diff position in `skills/step/SKILL.md`. Acceptable as "between v0.4 auto-merge bullet and resolvedMode bullet" or should the spec show the full patched block?
+3. **Triage preamble APPEND position** — between "rubric + threads" and "final decision," explicitly. Should the spec call out the marker line / paragraph break the implementer should look for?
 
 ---
 
-## 10. Implementation order (unchanged from iter1)
+## 10. Implementation order
 
-1. **Iter2 spec review** — `/pr-autopilot:review-spec --bootstrap` (2 free Claude subagents only, skip cursor per token-cost concern).
-2. **Skill changes** — apply edits per §5 to `skills/step/SKILL.md`, `skills/review-spec/SKILL.md`, `skills/assign/SKILL.md`.
-3. **Recipe doc** — write `docs/recipes/graphify-team-setup.md` per §5.4 (8 steps + onboarding).
-4. **EVAL scenarios** — add §7 scenarios (26 through 26h) to EVAL.md.
-5. **README + plugin.json** — bump version, add subsection with Mode Y carve-out.
-6. **Self-verify** — read each modified SKILL.md end-to-end checking the §5.1a (pre-load) vs §5.1b (post-load) split is consistent.
-7. **Commit** — single conventional commit: `feat(v0.5.3): graphify code knowledge graph awareness`.
-8. **PR** — open against main.
-9. **Dogfood** — run `/pr-autopilot:step <PR#>` on the PR (pr-autopilot has no graphify graph yet, so this tests the `advisory=auto` "missing" path).
-10. **Asistel adoption** — apply recipe steps to Asistel repo separately, commit + push the initial graphify-out/graph.json there.
+1. **iter3 spec review** — `/pr-autopilot:review-spec --bootstrap` (2 free Claude subagents only, NO cursor cloud per token-cost concern).
+2. **Skill changes** — apply edits per §5 to `skills/step/SKILL.md`, `skills/review-spec/SKILL.md`, `skills/assign/SKILL.md`. (No recipe doc, no `@copilot` augmentation — both deferred.)
+3. **EVAL scenarios** — add §7 scenarios 52-52h to EVAL.md; update counter.
+4. **README + plugin.json** — bump version, add §5.4 "Sharing your graph" pointer + §5.7 awareness paragraph + Mode Y carve-out.
+5. **Self-verify** — read each modified SKILL.md end-to-end checking §5.1a placement (before §0.5) and §5.1b placement (after §0.6).
+6. **Commit** — single conventional commit: `feat(v0.5.3): graphify awareness (scope-reduced, recipe deferred)`.
+7. **PR** — open against main.
+8. **Dogfood** — run `/pr-autopilot:step <PR#>` on the PR (pr-autopilot has no graphify graph yet, tests `advisory=auto absent` path).
+9. **Asistel adoption** — separately, decide on sharing model (see §5.4 README pointer); apply to Asistel as a separate concern.
 
 ---
 
@@ -532,41 +399,48 @@ Each scenario gated for v0.5.3 release.
 - ExoVault memory `fb285a18` — Marcin verbatim "yes do it for 0.5.3"
 - ExoVault memory `ca13f9dd` — Asistel graphify build evidence
 - [ADR 0002](../../decisions/0002-v0.5.3-cso-final-pass-deferred.md) — cso deferral pattern
-- [ADR 0001](../../decisions/0001-v0.6-mcp-server-rejected.md) — MCP rejection
-- graphify repo: <https://github.com/safishamsi/graphify> (MIT)
-- graphify version pinned: `0.8.22` (verified against source at this tag, NOT just changelog)
-- Local Asistel CLAUDE.md §"Code Knowledge Graph (graphify)" — adoption pattern documented
-- **iter1 review findings (preserved as §A audit log below)**
+- graphify repo: <https://github.com/safishamsi/graphify> (MIT, pinned v0.8.22 verified against source)
+- Local Asistel CLAUDE.md §"Code Knowledge Graph (graphify)"
 
 ---
 
-## §A. Iter1 audit log
+## §A. Iter2 audit log + scope-reduction disposition
 
-iter1 of this spec was reviewed by 3 channels on 2026-05-28 / 2026-05-29:
+**iter2 review (2 channels, no cursor per token-cost concern):**
 
 | Channel | Model | Time | Findings |
 |---|---|---|---|
-| feature-dev:code-reviewer | claude-opus-4-7 | 151s | 2 P0 / 5 P1 / 3 P2 |
-| general-purpose adversarial | claude-opus-4-7 | 200s | 6 P0 / 6 P1 / 0 P2 |
-| cursor-cloud-agent | composer-2.5 | ~5min, ~1.5M tokens | 5 P0 / 10 P1 / 7 P2 |
+| feature-dev:code-reviewer | claude-opus-4-7 | 184s | 3 P0 / 6 P1 / 2 P2 |
+| general-purpose adversarial | claude-opus-4-7 | 302s | 7 P0 / 9 P1 / 0 P2 |
 
-**Aggregate (deduplicated): 9 P0 / ~15 P1 / ~10 P2.**
+**Aggregate (deduplicated): ~8 P0 / ~13 P1 / 2 P2.**
 
-iter2 addressed all 9 P0s and critical P1s:
+iter3 disposition by P0:
 
-| P0 | Source | Resolution |
+| Iter2 P0 | Source | Iter3 disposition |
 |---|---|---|
-| broken-folder PAUSE breaks /assign contract | feature-dev | §5.1c separated; /assign always advisory |
-| state schema not bumped, fields undefined | feature-dev + adversarial (independent) | §5.1b explicit v3→v4 bump + migration block |
-| §5.1 pseudocode placed before §0.5 Load State | cursor | Split into §5.1a (pre-load fs check) + §5.1b (post-load state setting) |
-| §1/§3/§4/§5.1/§5.6/§7 contradictions on default | feature-dev + cursor | All references now align with `advisory=auto = INFO + continue` |
-| §5.1 doesn't implement §5.3 config | cursor | §5.1b explicit pseudocode for all 3 advisory modes; promptHint applied in §5.2; minimumStaleness deferred to v0.5.4 |
-| state.graphifyAvailable unusable in /review-spec + /assign | cursor | §5.1c (assign, fs-only) + §5.1d (review-spec, dispatch-time fs check) |
-| Step 10 triage is in-process, not subagent | cursor | §5.2 B targets step 10 preamble (in-process); §5.2 A targets review-spec subagents |
-| graphifyVersion field doesn't exist | adversarial | Replaced with `state.graphifyBuiltAtCommit` (real field per verification) |
-| Recipe gitignore missing files | adversarial | Whitelist pattern: `graphify-out/*` + `!graphify-out/graph.json` |
-| Merge driver no proactive detection | adversarial | §5.1a `_graphifyMergeDriverMissing` + 0.5a once-per-repo warning |
+| EVAL scenario collision (26 already exists) | feature-dev | **FIXED** — renumbered to 52-52h |
+| `advisory=off` doesn't short-circuit broken folder | feature-dev | **FIXED** — `advisory=off` now branches at TOP of §5.1b (§5.1b first line) |
+| `--no-verify` doesn't stop post-commit recursion (empirically verified by adversarial in tmp) | feature-dev + adversarial (both, independently) | **DROPPED FROM SCOPE** — recipe removed entirely from v0.5.3 |
+| Amend changes commit SHA → breaks pr-autopilot's own flow | adversarial | **DROPPED FROM SCOPE** — no auto-amend in v0.5.3 |
+| §0.5a placement vs auto-merge wait | feature-dev + adversarial (both) | **FIXED** — §5.1b moved AFTER §0.6 merge-wait short-circuit |
+| `built_at_commit` confabulated "empty" claim | adversarial | **FIXED** — hardened jq with `type` check; removed false claim |
+| `graphify update` not free for non-code commits | adversarial | **DROPPED FROM SCOPE** — no auto-update hook in v0.5.3 |
+| `@copilot` comment body P.S. speculation could break Mode Y | adversarial | **DROPPED FROM SCOPE** — Mode Y augmentation removed; documented manual `AGENTS.md` workaround |
+| gitleaks "MANDATORY" without integration | adversarial | **DROPPED FROM SCOPE** — no recipe = no gitleaks question |
+| §5.2 C targets wrong step (5.5 is multi-case) | feature-dev | **DROPPED FROM SCOPE** — §5.2 C removed |
+| §4 vs §7 scenario count mismatch | feature-dev | **FIXED** — §4 row enumerates all scenarios; aligned with §7 |
+| `promptHint` not honored in §5.2 B | feature-dev | **FIXED** — §5.2 B now checks `config.graphify.promptHint == true` |
 
-Critical P1 fixes applied: post-commit hook (matches upstream graphify v0.8.22), `linguist-generated=true` for diff hiding, hard `|| true` graceful degrade on hooks, husky-append shown explicitly, security recipe (initial + ongoing scans), Windows PowerShell regex variant, `@copilot` comment body Mode Y hint, 50-70% claim retracted.
+**Net result:** 6 of ~8 P0s resolved by scope drop (recipe + Mode Y augmentation). 4 mechanical fixes in §5.1b pseudocode. Surface area dramatically reduced.
 
-Iter1 review outputs (full text) preserved in session transcript; this spec embodies the deltas.
+iter2 P1 dispositions (selected):
+
+- `gh repo view` runs 3x per tick → **FIXED** — `GRAPHIFY_OWNER`/`GRAPHIFY_REPO` cached at top of §5.1a
+- merge-driver advisory leaks for `advisory=off` → **N/A** (merge-driver advisory dropped with recipe)
+- Triage preamble uses prepend on long context → **FIXED** — §5.2 B is APPEND, not prepend
+- State schema bump position undocumented → **FIXED** — explicit bullet between v0.4 auto-merge and resolvedMode
+- Per-PR vs per-repo flag inconsistency → **FIXED** — both notice and merge-driver advisory use per-repo flag pattern (the latter dropped anyway)
+- `linguist-generated=true` doesn't actually collapse PR diffs → **N/A** (recipe dropped)
+
+**Lesson learned (saving to memory after iter3):** specs that include recipes need to be **empirically tested end-to-end in a tmp repo BEFORE review-spec dispatch**. The adversarial reviewer running my iter2 recipe in `/tmp/gtest3` and observing 6 hook fires was decisive evidence; spec-only review by Claude subagents would never have caught it. Future v0.5.4 recipe spec MUST include a verification step.

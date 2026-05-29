@@ -173,6 +173,23 @@ v0.5.1 limitation: status table updates atomically at Step 4 (since subagent dis
 
 ### Step 2 — dispatch sync adapters in parallel
 
+**Graphify dispatch-time filesystem check (v0.5.3+):** before dispatching adapters, check whether this repo has a graphify code knowledge graph at `graphify-out/graph.json`. /review-spec has NO per-PR state file (bootstrap mode has no PR; normal mode hasn't loaded claim state at this point), so the check is purely filesystem-based:
+
+```bash
+# PR #9 review P1 fix: also gate on `advisory != "off"` so the hint is NEVER injected
+# when the user opted out at the config level, even if a graph happens to exist on disk.
+# Matches the /step §0.6a contract: advisory=off means "skip entirely" everywhere.
+if [ "${config_graphify_advisory:-auto}" != "off" ] \
+  && [ -f "graphify-out/graph.json" ] \
+  && [ "${config_graphify_promptHint:-true}" = "true" ]; then
+  _graphifyHintEnabled="true"
+else
+  _graphifyHintEnabled="false"
+fi
+```
+
+When `_graphifyHintEnabled == "true"`, the **claude-code-reviewer-subagent** and **claude-self-review** prompts (see "Adapter prompts" below) get a graphify hint prepended that tells the subagent to query the graph before grep'ing files.
+
 For cursor-cloud-agent, run the **probe FIRST** to determine plan eligibility:
 ```bash
 # Fallback CLAUDE_PLUGIN_ROOT for manual-copy contexts (per Composer review iter3 P2-2):
@@ -357,6 +374,20 @@ git commit -m "chore(pr-autopilot): review-spec iter <n> for <id> — <N> P0, <M
 ```
 
 ## Adapter prompts (PUSHBACK.md rubric)
+
+**Graphify hint prefix (v0.5.3+):** when `_graphifyHintEnabled == "true"` (set in Step 2), prepend the following block to BOTH `claude-code-reviewer-subagent` and `claude-self-review` prompts:
+
+```
+**Code knowledge graph available:** This repo has a graphify-built knowledge graph at
+`graphify-out/graph.json`. BEFORE grep'ing for symbols or reading source files, query
+the graph: `graphify explain "<symbol>"` returns the node + connections + community
+in ~1-3k tokens vs ~30-100k for a multi-file grep. Use `graphify path "A" "B"` for
+dependency-trace. If `graphify` errors with "command not found" (CLI not installed
+locally), fall back to grep + Read without retrying.
+
+```
+
+When `_graphifyHintEnabled == "false"`, the hint block is omitted entirely (no instruction injection).
 
 **claude-code-reviewer-subagent prompt template:**
 ```

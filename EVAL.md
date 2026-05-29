@@ -108,7 +108,7 @@ These cover the new `/assign`, `/review-spec`, `/approve-spec`, `/pr-opened`, `/
 | 46 | **`/finish` PR not merged** | `gh pr view <PR#> --json mergedAt` returns null | reject: "PR #<N> is not merged (state: <state>). `/finish` requires a merged PR." |
 | 47 | **Abandoned worktree recovery** | previous session crashed after `git worktree add` but before claim file commit | `/assign` detects existing worktree without claim file → echo "Orphan worktree at `<path>` without claim file. Run `/pr-autopilot:unassign <id>` to clean up, then retry."; does not clobber |
 
-47 test cases at v0.5; +7 added in v0.5.1 → 54 total. 8 v0.1 gating (1, 4, 8, 11, 17Y, 22, 23, 24) + auto-trigger 25–30 (v0.3) + auto-merge 31–38 (v0.4) + pre-PR lifecycle 39–47 (v0.5) + review-spec improvements 48–50 + variants (v0.5.1).
+47 test cases at v0.5; +7 added in v0.5.1 → 54; +2 added in v0.5.2 (50b, 51) → 56; +11 added in v0.5.3 (52, 52b, 52b-bis, 52c, 52d, 52e, 52e-bis, 52e-ter, 52f, 52g, 52h) → **67 total**. 8 v0.1 gating (1, 4, 8, 11, 17Y, 22, 23, 24) + auto-trigger 25–30 (v0.3) + auto-merge 31–38 (v0.4) + pre-PR lifecycle 39–47 (v0.5) + review-spec improvements 48–50 + variants (v0.5.1) + per-reviewer summary 50b/51 (v0.5.2) + graphify awareness 52–52h + 52e-ter (v0.5.3).
 
 **v0.5 gating subset for v1.0.0** (must pass on a real assignment in MarcinSufa/asistel or MarcinSufa/exo-vault):
 - 39 (graceful error)
@@ -160,6 +160,33 @@ Two new scenarios + one variant in v0.5.2 (commits 1-3):
 - 51 validates on next real `/review-spec` invocation (e.g., the Asistel onboarding bootstrap review)
 
 EVAL 50b is NOT part of the gating subset (demoted per Composer review iter3 P1-4) — unit tests T12/T12b provide sufficient coverage of the Privacy-Mode-Legacy code path. Live verification on a real Cursor account is optional manual check only.
+
+---
+
+### v0.5.3 — Graphify code knowledge graph awareness (scenarios 52, 52b, 52b-bis, 52c, 52d, 52e, 52e-bis, 52f, 52g, 52h)
+
+9 new scenarios + 1 base case validating pre-flight 0.4b + §0.6a advisory + subagent hint + state schema v3→v4 + Mode Y carve-out:
+
+| # | Scenario | Trigger | Expected |
+|---|---|---|---|
+| 52 | **Happy path — graph present** | PR in repo with `graphify-out/graph.json` committed, config defaults | §0.4b sets `_graphifyFsState=present`; §0.6a sets `state.graphifyAvailable=true` + `state.graphifyBuiltAtCommit` populated; silent (no notification); `/review-spec` adapter prompts include graphify hint; `/step` step 10 triage preamble includes graphify hint. |
+| 52b | **`advisory=auto` (default) + missing graph, first PR in repo** | PR in repo without `graphify-out/`, config defaults | §0.6a sets `state.graphifyAvailable=false`; per-repo notice flag created at `$HOME/.pr-autopilot/<owner>-<repo>-graphify-notice.flag`; INFO notification fires ONCE; loop continues; subagent prompts do NOT include hint. |
+| 52b-bis | **Same repo, second PR — notice flag already exists** | Repo as 52b, second PR opened, flag present from 52b | §0.6a does NOT re-notify (flag check); loop continues normally; subagent prompts still do NOT include hint. **Validates per-repo (not per-PR) scope of notice flag.** |
+| 52c | **`advisory=always` + missing graph** | PR in repo without `graphify-out/`, config `graphify.advisory=always` | §0.6a PAUSEs with actionable strict-mode message; KEEP state. |
+| 52d | **Broken folder in `/step`** | PR in repo with `graphify-out/cache/` but no `graphify-out/graph.json`, any advisory except `off` | §0.6a PAUSEs with rebuild message regardless of `auto`/`always`; `advisory=off` short-circuits at top (separate scenario 52e). |
+| 52e | **`advisory=off` + missing graph** | PR in repo WITHOUT `graphify-out/`, config `graphify.advisory=off` | §0.6a short-circuits at top of branch tree, no notification, loop continues. Subagent prompts do NOT include hint. |
+| 52e-bis | **`advisory=off` + broken folder (iter2 P0 #2 regression test)** | PR in repo with `graphify-out/cache/` but no `graphify-out/graph.json`, config `graphify.advisory=off` | §0.6a short-circuits at top (advisory=off branch FIRST); broken folder check is NEVER reached; loop continues silently. **Validates iter2 P0 #2 fix — `advisory=off` does NOT PAUSE on broken folder.** |
+| 52e-ter | **`advisory=off` + graph present (PR #9 review P1 regression test)** | PR in repo WITH `graphify-out/graph.json` committed, config `graphify.advisory=off` | `/step` §0.6a: `state.graphifyAvailable=false` despite file present; step 10 triage gets NO graphify hint. `/review-spec` Step 2: `_graphifyHintEnabled=false` despite file present; subagent prompts do NOT include hint. `/assign` step 3.5: silent (no INFO since graph is present and advisory=off). **Validates PR #9 review P1 fix — `advisory=off` truly means "skip entirely" across ALL three skills, regardless of graph presence.** |
+| 52f | **Graph committed but CLI not installed locally** | PR in repo with `graphify-out/graph.json` but teammate hasn't run `uv tool install graphifyy` (PyPI package name is `graphifyy` with double-y; binary installed is `graphify` with single-y — verified against upstream `safishamsi/graphify@v0.8.22`) | §0.6a passes (file present, `state.graphifyAvailable=true`); subagent gets hint; subagent's `graphify explain X` errors with exit 127; subagent falls back to grep + Read; review proceeds. **Validates graceful CLI-missing fallback.** |
+| 52g | **`/assign` step 3.5 with broken folder (iter1 P0 #1 regression test)** | Run `/pr-autopilot:assign <id>` in repo with `graphify-out/cache/` but no `graphify-out/graph.json` | INFO message echoed (NOT PAUSE), claim file created normally regardless of graphify state. **Validates iter1 P0 #1 fix — `/assign` is always advisory.** |
+| 52h | **Queued-merge wait + graphify state change (iter2 P0 #5 regression test)** | PR with `state.autoMergeQueued=true` (queued by prior tick); user breaks `graphify-out/` between ticks | §0.6 merge-wait short-circuit fires BEFORE §0.6a is reached; merge wait proceeds normally; no graphify notification interrupts the queued-merge resume. **Validates §0.6a placement AFTER §0.6.** |
+
+**v0.5.3 gating subset for "field-validated"** (extends v0.5.2; does not replace):
+
+- Scenarios 52 (happy path) + 52b (auto + missing first-PR INFO) + 52c (always PAUSE) + 52d (broken folder PAUSE in /step) + 52e + 52e-bis (advisory=off regression) + 52g (/assign always advisory) are gating
+- 52b-bis (notice flag scope), 52f (CLI fallback), 52h (queued-merge placement) are recommended but not gating (require setup choreography)
+
+Live verification: 52 expected to validate on first PR in any Asistel-like repo with graphify-out committed. 52b validates on this PR (pr-autopilot has no graphify graph).
 
 ---
 

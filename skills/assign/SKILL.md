@@ -37,23 +37,30 @@ Full algorithm + state machine + claim file schema: `docs/superpowers/specs/2026
 3.5 **Graphify code knowledge graph advisory (v0.5.3+)** — filesystem-only check, **ALWAYS ADVISORY, NEVER PAUSE / BLOCK claim creation**. This is the explicit `/assign` invariant: graphify state never gates assignment.
 
    ```bash
-   # Capture owner/repo once (reused for state file in /step too)
-   GRAPHIFY_OWNER=$(gh repo view --json owner --jq '.owner.login')
-   GRAPHIFY_REPO=$(gh repo view --json name --jq '.name')
-   GRAPHIFY_NOTICE_FLAG="$HOME/.pr-autopilot/${GRAPHIFY_OWNER}-${GRAPHIFY_REPO}-graphify-notice.flag"
-
-   if [ -f "graphify-out/graph.json" ]; then
-     : # silent; no notification — graph is present
-   elif [ -d "graphify-out" ]; then
-     # Broken folder still INFOs in /assign — rationale: blocking claim creation is worse
-     # than proceeding without graph hints. /step PAUSEs on broken because loop progress
-     # with stale state would be misleading; /assign is a one-shot claim.
-     echo "[INFO] graphify-out/ exists but graph.json missing. Run 'graphify extract .' to rebuild for token-reduction during /pr-autopilot:step. (advisory only; claim file will be created.)"
+   # PR #9 review P2 fix: short-circuit at top when advisory=off, matching the
+   # /step §0.6a + /review-spec Step 2 contract — "skip entirely" means no
+   # INFO notification anywhere, even in /assign.
+   if [ "${config_graphify_advisory:-auto}" = "off" ]; then
+     : # advisory=off — skip entirely; no INFO, no flag write; continue to step 4
    else
-     # Honor per-repo notice flag (same flag /step uses; if /step already INFO'd, /assign stays silent)
-     if [ ! -f "$GRAPHIFY_NOTICE_FLAG" ]; then
-       echo "[INFO] This repo has no graphify code knowledge graph. Run /graphify . once for token reduction during PR review loops. (advisory only.)"
-       touch "$GRAPHIFY_NOTICE_FLAG"
+     # Capture owner/repo once (reused for state file in /step too)
+     GRAPHIFY_OWNER=$(gh repo view --json owner --jq '.owner.login')
+     GRAPHIFY_REPO=$(gh repo view --json name --jq '.name')
+     GRAPHIFY_NOTICE_FLAG="$HOME/.pr-autopilot/${GRAPHIFY_OWNER}-${GRAPHIFY_REPO}-graphify-notice.flag"
+
+     if [ -f "graphify-out/graph.json" ]; then
+       : # silent; no notification — graph is present
+     elif [ -d "graphify-out" ]; then
+       # Broken folder still INFOs in /assign — rationale: blocking claim creation is worse
+       # than proceeding without graph hints. /step PAUSEs on broken because loop progress
+       # with stale state would be misleading; /assign is a one-shot claim.
+       echo "[INFO] graphify-out/ exists but graph.json missing. Run 'graphify extract .' to rebuild for token-reduction during /pr-autopilot:step. (advisory only; claim file will be created.)"
+     else
+       # Honor per-repo notice flag (same flag /step uses; if /step already INFO'd, /assign stays silent)
+       if [ ! -f "$GRAPHIFY_NOTICE_FLAG" ]; then
+         echo "[INFO] This repo has no graphify code knowledge graph. Run /graphify . once for token reduction during PR review loops. (advisory only.)"
+         touch "$GRAPHIFY_NOTICE_FLAG"
+       fi
      fi
    fi
 

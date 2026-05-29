@@ -325,43 +325,43 @@ v0.5.3 provides NO Mode Y hint path beyond the manual `AGENTS.md` recommendation
 
 **Critical fix from iter2 P0 #1:** EVAL.md already defines scenario 26 (v0.3 "Auto-trigger: draft skip"). v0.5.3 graphify scenarios renumber to 52, 52b, 52b-bis, 52c, 52d, 52e, 52e-bis, 52f, 52g, 52h (10 labeled entries — 9 new tests, base 52 is the happy path). Counter math: `54 + 9 = 63 total` (verify via `grep -c "^### Scenario" EVAL.md` before claiming the starting count).
 
-**Scenario 52 — happy path, graph present**
+#### Scenario 52 — happy path, graph present
 - Setup: Asistel-like repo with `graphify-out/graph.json` committed. Config defaults.
 - Expected: §0.4b sets `_graphifyFsState=present`; §0.6a sets `state.graphifyAvailable=true`, silent; subagent prompts in `/review-spec` include hint; `/step` step 10 triage preamble includes hint.
 
-**Scenario 52b — `advisory=auto` (default), graph missing, first PR in repo**
+#### Scenario 52b — `advisory=auto` (default), graph missing, first PR in repo
 - Setup: PR in repo without `graphify-out/`. Config defaults.
 - Expected: §0.6a sets `state.graphifyAvailable=false`; per-repo notice flag created; INFO notification fires ONCE; loop continues; subagent prompts do NOT include hint.
 
-**Scenario 52b-bis — same repo, second PR (flag already exists)**
+#### Scenario 52b-bis — same repo, second PR (flag already exists)
 - Setup: same repo as 52b, second PR opened, flag from 52b present.
 - Expected: §0.6a does NOT re-notify; loop continues normally.
 
-**Scenario 52c — `advisory=always`, graph missing**
+#### Scenario 52c — `advisory=always`, graph missing
 - Setup: PR in repo without `graphify-out/`. Config: `graphify.advisory=always`.
 - Expected: §0.6a PAUSEs with actionable message; KEEP state.
 
-**Scenario 52d — broken folder, in `/step`**
+#### Scenario 52d — broken folder, in `/step`
 - Setup: PR in repo with `graphify-out/cache/` but no `graphify-out/graph.json`. Config: any advisory.
 - Expected: §0.6a PAUSEs with rebuild message (regardless of `auto`/`always`; only `off` skips).
 
-**Scenario 52e — `advisory=off`**
+#### Scenario 52e — `advisory=off`
 - Setup: PR in repo WITHOUT `graphify-out/`. Config: `graphify.advisory=off`.
 - Expected: §0.6a short-circuits at top, no notification, loop continues. Subagent prompts do NOT include hint.
 
-**Scenario 52e-bis — `advisory=off` + broken folder (iter2 P0 #2 regression test)**
+#### Scenario 52e-bis — `advisory=off` + broken folder (iter2 P0 #2 regression test)
 - Setup: PR in repo with `graphify-out/cache/` but no `graphify-out/graph.json`. Config: `graphify.advisory=off`.
 - Expected: §0.6a short-circuits at top (advisory=off branch FIRST); broken folder is NOT checked; loop continues silently. **Validates the iter2 P0 #2 fix — advisory=off does NOT PAUSE on broken folder.**
 
-**Scenario 52f — graph committed, CLI not installed locally**
+#### Scenario 52f — graph committed, CLI not installed locally
 - Setup: PR in repo with `graphify-out/graph.json` but teammate hasn't installed graphify CLI.
 - Expected: §0.6a passes (file present); subagent gets hint; subagent's `graphify explain X` errors with exit 127; subagent falls back to grep + Read; review proceeds.
 
-**Scenario 52g — `/assign` with broken folder (iter1 P0 #1 regression test)**
+#### Scenario 52g — `/assign` with broken folder (iter1 P0 #1 regression test)
 - Setup: Run `/pr-autopilot:assign <id>` in repo with `graphify-out/cache/` but no `graphify-out/graph.json`.
 - Expected: INFO message echoed (NOT PAUSE), claim file created normally. **Validates the iter1 P0 #1 fix — `/assign` is always advisory.**
 
-**Scenario 52h — queued-merge wait + graphify state change (iter2 adversarial P0 #5 regression test)**
+#### Scenario 52h — queued-merge wait + graphify state change (iter2 adversarial P0 #5 regression test)
 - Setup: PR with `state.autoMergeQueued=true` (queued by prior tick); user breaks `graphify-out/` between ticks.
 - Expected: §0.6 merge-wait short-circuit fires BEFORE §5.1b is reached; merge wait proceeds normally; no graphify notification interrupts the queued-merge resume. **Validates §0.6a placement AFTER §0.6.**
 

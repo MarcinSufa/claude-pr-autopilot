@@ -334,7 +334,6 @@ cfg_advisory = config.graphify.advisory  # "auto" (default) | "always" | "off"
 if cfg_advisory == "off":
   state.graphifyAvailable = false
   goto __graphify_advisory_done__   # fall through to Mode dispatch
-fi
 
 # advisory in {"auto", "always"} — apply filesystem state from §0.4b
 case _graphifyFsState of:

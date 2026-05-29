@@ -176,7 +176,12 @@ v0.5.1 limitation: status table updates atomically at Step 4 (since subagent dis
 **Graphify dispatch-time filesystem check (v0.5.3+):** before dispatching adapters, check whether this repo has a graphify code knowledge graph at `graphify-out/graph.json`. /review-spec has NO per-PR state file (bootstrap mode has no PR; normal mode hasn't loaded claim state at this point), so the check is purely filesystem-based:
 
 ```bash
-if [ -f "graphify-out/graph.json" ] && [ "${config_graphify_promptHint:-true}" = "true" ]; then
+# PR #9 review P1 fix: also gate on `advisory != "off"` so the hint is NEVER injected
+# when the user opted out at the config level, even if a graph happens to exist on disk.
+# Matches the /step §0.6a contract: advisory=off means "skip entirely" everywhere.
+if [ "${config_graphify_advisory:-auto}" != "off" ] \
+  && [ -f "graphify-out/graph.json" ] \
+  && [ "${config_graphify_promptHint:-true}" = "true" ]; then
   _graphifyHintEnabled="true"
 else
   _graphifyHintEnabled="false"

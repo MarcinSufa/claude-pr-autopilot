@@ -88,6 +88,35 @@ Default (repo not opted in) = OFF, behavior identical to v0.3.
 
 **Beta until the live exo-vault dogfood** (queue → merge → cleanup on a real dev-targeted PR) flips it to GA.
 
+## Code knowledge graph awareness (v0.5.3+)
+
+If your repo has a graphify-built knowledge graph at `graphify-out/graph.json`, pr-autopilot's dispatched `/review-spec` subagents (claude-code-reviewer + claude-self-review) AND the in-loop `/step` triage will prefer querying the graph (`graphify explain "<symbol>"`) over grep'ing source files for symbol-lookup questions. Estimated token reduction is significant but **not yet measured** — see EVAL scenarios 52* for the validation plan.
+
+**Mode Y limitation:** Copilot SWE Agent's prompt is GitHub-controlled — v0.5.3 does NOT augment SWE Agent's context. **Workaround:** add a graphify hint to your repo's `AGENTS.md` or `CLAUDE.md` — Copilot coding agent reads these as custom instructions ([documented since 2025-08-28](https://github.blog/changelog/2025-08-28-copilot-coding-agent-now-supports-agents-md-custom-instructions/)).
+
+**Config (`~/.claude/settings.json` → `prAutopilot.graphify`):**
+
+```json
+"graphify": {
+  "advisory": "auto",   // "auto" (default) | "always" | "off"
+  "promptHint": true    // disable to keep detection but skip instruction injection
+}
+```
+
+- `advisory=auto` — check for `graphify-out/graph.json`. Present → silent pass + hint injection. Absent → one-time INFO per repo. Continue normally.
+- `advisory=always` — PAUSE if graph missing. Use when graphify is mandatory for your team.
+- `advisory=off` — skip the check entirely.
+
+**Sharing the graph across teammates:** `graphify-out/graph.json` is portable (relative paths only) but per-machine by default. Three approaches, ordered by simplicity:
+
+1. **Commit to repo + git merge driver** — simplest for small teams. `graphify-out/graph.json` is committed; `.gitattributes` registers graphify's `merge-driver` for conflict resolution. **Auto-refresh hook is not prescribed in v0.5.3.** Any hook that mutates the working tree from a post-commit hook (`git add` + `git commit --amend`) risks recursion: `--no-verify` does NOT skip post-commit hooks. For now: refresh manually with `graphify update .` when you want a fresh graph; v0.5.4 will ship a tested hook pattern.
+2. **CI artifact + GitHub Release** — works at any team size. GH Action runs `graphify extract . --backend deepseek` on main merges, uploads as a release artifact. Teammates download via `gh release download`. ~3-5h CI setup.
+3. **ExoVault or other vault** — long-term architectural option. Net-new vault feature; multi-day build.
+
+v0.5.3 doesn't prescribe an approach — pick what fits your team. Pre-flight `state.graphifyAvailable` detection works regardless of source.
+
+**Worktree timing note:** if you use `/pr-autopilot:assign` to create branch worktrees, the worktree is based on the commit `origin/main` was at when assign ran. If you committed `graphify-out/graph.json` AFTER that commit, the worktree won't see it — pre-flight will report "no graph" even though main has one. Fix: `git -C <worktree-path> pull origin main` to sync.
+
 ## Status
 
 **v0.4.0 — safe auto-merge (pre-1.0).** Mode X + Mode Y rotation (v0.2), in-session auto-trigger (v0.3, beta), and opt-in dev-only auto-merge (v0.4, beta) shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them.

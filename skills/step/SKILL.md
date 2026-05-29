@@ -197,12 +197,28 @@ if ! gh pr view ${prNumber} --json number >/dev/null 2>&1; then
   PushNotification("ABORT", "PR #${prNumber} not found in $(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || echo 'this repo'). Verify the PR number and the current working directory.")
   return  # terminate
 fi
+
+# 0.4b — graphify code knowledge graph filesystem detection (v0.5.3+)
+# Pure filesystem check; NO state interaction yet (state loads in §0.5).
+# Also caches GRAPHIFY_OWNER / GRAPHIFY_REPO for reuse in §0.5 STATE_FILE construction
+# and §0.6a per-repo notice flag (avoids triple `gh repo view` per tick).
+if [ -f "graphify-out/graph.json" ]; then
+  _graphifyFsState="present"
+elif [ -d "graphify-out" ]; then
+  _graphifyFsState="broken"   # folder exists but no graph.json — last `graphify extract` failed
+else
+  _graphifyFsState="absent"
+fi
+GRAPHIFY_OWNER=$(gh repo view --json owner --jq '.owner.login')
+GRAPHIFY_REPO=$(gh repo view --json name --jq '.name')
+GRAPHIFY_NOTICE_FLAG="$HOME/.pr-autopilot/${GRAPHIFY_OWNER}-${GRAPHIFY_REPO}-graphify-notice.flag"
 ```
 
 ### 0.5 Load state
 
 ```bash
-STATE_FILE="$HOME/.pr-autopilot/$(gh repo view --json owner --jq '.owner.login')-$(gh repo view --json name --jq '.name')-${prNumber}.json"
+# Reuse cached GRAPHIFY_OWNER / GRAPHIFY_REPO from §0.4b (DRY — avoids extra `gh repo view` calls)
+STATE_FILE="$HOME/.pr-autopilot/${GRAPHIFY_OWNER}-${GRAPHIFY_REPO}-${prNumber}.json"
 if [ -f "$STATE_FILE" ]; then state = read $STATE_FILE; else state = createNew(prNumber); fi
 ```
 
@@ -220,7 +236,7 @@ State schema:
 
 ```json
 {
-  "stateSchemaVersion": 3,
+  "stateSchemaVersion": 4,
   "prNumber": 0,
   "repo": "<owner>/<name>",
   "headRef": "<branch>",
@@ -254,7 +270,10 @@ State schema:
 
   "handledOids": ["<sha>", "..."],
   "handledCommentIds": [123456],
-  "reviewIteration": 0
+  "reviewIteration": 0,
+
+  "graphifyAvailable": false,
+  "graphifyBuiltAtCommit": ""
 }
 ```
 
@@ -263,6 +282,7 @@ State schema:
 - `stateSchemaVersion: 3` — bumped from v2 (v0.2) for the v0.4 auto-merge fields. Migration is purely additive: a v2 file loads with `autoMergeQueued: false`, `pollTicksWhileQueued: 0` (defaults); no fresh start needed. The v1 handling below is unchanged.
 - `stateSchemaVersion` absent (implicit v1) — treated as v1 (Mode X) and requires a fresh start if the user switches to Mode Y. The `state.stateSchemaVersion is None` Mode-Y ABORT guard (Y.0.5) still keys off "field absent", so the v2→v3 bump does not affect it.
 - **Auto-merge fields (v0.4):** `autoMergeQueued` — set true once `gh pr merge` is called; read by **step 0.6** (short-circuit into merge-wait) and **gate 6** (avoid re-queue). `autoMergeAt` — ISO timestamp the merge was queued (telemetry). `pollTicksWhileQueued` — **dedicated** counter incremented ONLY in the step-0.6 merge-wait branch, compared to `pollTickCap` for stuck-queue detection; NOT `pollTicksWithoutReview` / `pollTicksWithoutActivity` (those drive the review lifecycle). State is deleted only when step 0.6 observes `MERGED`/`CLOSED`, never when the merge is merely queued — "queued" ≠ "merged".
+- **Graphify awareness fields (v0.5.3, schema v4):** `graphifyAvailable: false`, `graphifyBuiltAtCommit: ""` — set by new §0.6a check (filesystem detection of `graphify-out/graph.json` + jq-typed `built_at_commit` extraction). Migration is purely additive: a v3 state file loads with both defaulted; no fresh start needed. The `state.stateSchemaVersion is None` Mode-Y ABORT guard (Y.0.5) is unaffected — v3→v4 is additive only, the guard fires on field absent, not on field value. `graphifyBuiltAtCommit` is NOT used to gate behavior in v0.5.3 (persisted for v0.5.4 `minimumStaleness` ancestry check).
 - `resolvedMode` — persisted on first tick; mode-drift guard (Y.0.5) aborts if config-derived mode differs from stored mode.
 - `pushbackReplies` (v0.1) → **split into** `threadPushbacks` (Mode X, was Mode X-only in practice anyway) and `commitPushbacks` (Mode Y new).
 - `handledOids`, `handledCommentIds`, `lastTriggerAt`, `pollTicksWithoutActivity`, `reviewIteration` — all Mode Y additions.
@@ -298,6 +318,61 @@ if state.autoMergeQueued == true:
   saveState($STATE_FILE)
   ScheduleWakeup(config.pollIntervalSeconds, "/loop /pr-autopilot:step ${prNumber}", "waiting for queued auto-merge to complete")
   return  # still queued — wait; skip steps 1-11 AND Mode dispatch
+```
+
+### 0.6a graphify advisory dispatch (v0.5.3+)
+
+Placed AFTER §0.6 merge-wait short-circuit so queued-merge ticks are NEVER disturbed by graphify notifications. Reads `_graphifyFsState` cached in §0.4b. Runs BEFORE Mode dispatch so both Mode X and Mode Y get a consistent `state.graphifyAvailable`.
+
+```python
+# 0.6a — graphify state + advisory (runs AFTER §0.6, BEFORE Mode dispatch)
+
+cfg_advisory = config.graphify.advisory  # "auto" (default) | "always" | "off"
+
+# advisory=off short-circuits at TOP — skips ALL filesystem dispatches.
+# Defends advisory=off + broken folder from firing PAUSE.
+if cfg_advisory == "off":
+  state.graphifyAvailable = false
+  goto __graphify_advisory_done__   # fall through to Mode dispatch
+fi
+
+# advisory in {"auto", "always"} — apply filesystem state from §0.4b
+case _graphifyFsState of:
+
+  "present":
+    state.graphifyAvailable = true
+    # Hardened jq with type check — defends against future graphify versions emitting
+    # an object {} or null for .built_at_commit (current Asistel-verified value: real SHA).
+    BUILT_AT=$(jq -r 'if (.built_at_commit | type) == "string" then .built_at_commit else "" end' graphify-out/graph.json 2>/dev/null || echo "")
+    state.graphifyBuiltAtCommit = "$BUILT_AT"
+    # NOT used to gate behavior in v0.5.3 — persisted for v0.5.4 minimumStaleness ancestry check.
+
+  "broken":
+    # Rationale: broken folder indicates a failed prior build — the graph state is
+    # indeterminate. `advisory=auto` still PAUSEs here (asymmetric vs the absent case
+    # which only INFOs) because continuing the loop with unknown graph state is less
+    # safe than blocking once with an actionable rebuild message. `advisory=off`
+    # short-circuited above and never reaches this branch.
+    state.graphifyAvailable = false
+    PushNotification("PR #${prNumber} PAUSED — graphify build incomplete", "graphify-out/ exists but graph.json is missing (last `graphify extract` may have failed). Run `graphify extract . --backend deepseek` to rebuild, then re-run /pr-autopilot:step ${prNumber}.")
+    saveState($STATE_FILE)
+    return  # PAUSE; KEEP state
+
+  "absent":
+    state.graphifyAvailable = false
+    if cfg_advisory == "always":
+      PushNotification("PR #${prNumber} PAUSED — graphify required but missing", "graphify.advisory=always but no graphify-out/graph.json found. Run `/graphify .` first, then re-run /pr-autopilot:step ${prNumber}. To disable strict mode set graphify.advisory=auto in ~/.claude/settings.json.")
+      saveState($STATE_FILE)
+      return  # PAUSE; KEEP state
+    else:  # cfg_advisory == "auto"
+      # Per-repo notice flag (NOT per-PR) — uses $GRAPHIFY_NOTICE_FLAG cached in §0.4b
+      if [ ! -f "$GRAPHIFY_NOTICE_FLAG" ]; then
+        PushNotification("INFO: graphify recommendation", "This repo has no graphify code knowledge graph. Run `/graphify .` once for token-reduction during PR review loops. (See README §'Code knowledge graph awareness'.)")
+        touch "$GRAPHIFY_NOTICE_FLAG"
+      fi
+      # fall through normally — loop continues
+
+__graphify_advisory_done__:
 ```
 
 **Mode dispatch** — after pre-flight resolves `mode` and loads state, route to the Mode Y algorithm or fall through to Mode X:
@@ -514,6 +589,10 @@ if all_per_iter_happy AND unresolved_not_ours.length == 0:
 ```
 
 ### 10. Triage (multi-login dispatch)
+
+**Graphify preamble (v0.5.3+):** If `state.graphifyAvailable == true` AND `config.graphify.promptHint == true` (default), apply this reasoning rule BEFORE invoking review triage:
+
+> Before judging reviewer comments about symbol X, query `graphify explain "X"` to see X's connections/community. Use `graphify path "X" "Y"` for dependency-validity questions. Only `Read` source files when graphify returns insufficient context.
 
 Invoke the routine in `REVIEW-TRIAGE-COPY.md` with:
 
@@ -1053,6 +1132,13 @@ Gates 1 (default-off) + 3 (production guard) are the safety floor. `lineMatchCas
 | Auto-merge blocked (conflicts / `mergeStateStatus` DIRTY) | 0.6 | STOP (KEEP state) |
 | Auto-merge stuck (`pollTickCap` ticks while queued) | 0.6 | STOP (KEEP state) |
 | PR merged after queue | 0.6 | SUCCESS_STOP (state deleted) |
+| **Graphify (v0.5.3+):** `advisory=off` AND any filesystem state | 0.6a | PASS (no notification, `state.graphifyAvailable=false`) |
+| **Graphify:** `state.autoMergeQueued=true` (queued-merge wait) | 0.6 short-circuits BEFORE 0.6a | §0.6a never runs; merge wait proceeds normally |
+| **Graphify:** `advisory=auto` AND `graph.json` present | 0.6a | PASS (silent, `state.graphifyAvailable=true`) |
+| **Graphify:** `advisory=auto` AND `graph.json` absent (no folder) | 0.6a | INFO once per repo (notice flag), continue |
+| **Graphify:** `advisory=auto` AND broken folder (cache without graph.json) | 0.6a | PAUSE (KEEP state, rebuild message) |
+| **Graphify:** `advisory=always` AND `graph.json` absent | 0.6a | PAUSE (KEEP state, strict-mode message) |
+| **Graphify:** `advisory=always` AND broken folder | 0.6a | PAUSE (KEEP state, rebuild message) |
 
 ## Error handling (auto-merge, v0.4)
 

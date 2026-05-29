@@ -163,6 +163,32 @@ EVAL 50b is NOT part of the gating subset (demoted per Composer review iter3 P1-
 
 ---
 
+### v0.5.3 — Graphify code knowledge graph awareness (scenarios 52, 52b, 52b-bis, 52c, 52d, 52e, 52e-bis, 52f, 52g, 52h)
+
+9 new scenarios + 1 base case validating pre-flight 0.4b + §0.6a advisory + subagent hint + state schema v3→v4 + Mode Y carve-out:
+
+| # | Scenario | Trigger | Expected |
+|---|---|---|---|
+| 52 | **Happy path — graph present** | PR in repo with `graphify-out/graph.json` committed, config defaults | §0.4b sets `_graphifyFsState=present`; §0.6a sets `state.graphifyAvailable=true` + `state.graphifyBuiltAtCommit` populated; silent (no notification); `/review-spec` adapter prompts include graphify hint; `/step` step 10 triage preamble includes graphify hint. |
+| 52b | **`advisory=auto` (default) + missing graph, first PR in repo** | PR in repo without `graphify-out/`, config defaults | §0.6a sets `state.graphifyAvailable=false`; per-repo notice flag created at `$HOME/.pr-autopilot/<owner>-<repo>-graphify-notice.flag`; INFO notification fires ONCE; loop continues; subagent prompts do NOT include hint. |
+| 52b-bis | **Same repo, second PR — notice flag already exists** | Repo as 52b, second PR opened, flag present from 52b | §0.6a does NOT re-notify (flag check); loop continues normally; subagent prompts still do NOT include hint. **Validates per-repo (not per-PR) scope of notice flag.** |
+| 52c | **`advisory=always` + missing graph** | PR in repo without `graphify-out/`, config `graphify.advisory=always` | §0.6a PAUSEs with actionable strict-mode message; KEEP state. |
+| 52d | **Broken folder in `/step`** | PR in repo with `graphify-out/cache/` but no `graphify-out/graph.json`, any advisory except `off` | §0.6a PAUSEs with rebuild message regardless of `auto`/`always`; `advisory=off` short-circuits at top (separate scenario 52e). |
+| 52e | **`advisory=off` + missing graph** | PR in repo WITHOUT `graphify-out/`, config `graphify.advisory=off` | §0.6a short-circuits at top of branch tree, no notification, loop continues. Subagent prompts do NOT include hint. |
+| 52e-bis | **`advisory=off` + broken folder (iter2 P0 #2 regression test)** | PR in repo with `graphify-out/cache/` but no `graphify-out/graph.json`, config `graphify.advisory=off` | §0.6a short-circuits at top (advisory=off branch FIRST); broken folder check is NEVER reached; loop continues silently. **Validates iter2 P0 #2 fix — `advisory=off` does NOT PAUSE on broken folder.** |
+| 52f | **Graph committed but CLI not installed locally** | PR in repo with `graphify-out/graph.json` but teammate hasn't run `uv tool install graphifyy` | §0.6a passes (file present, `state.graphifyAvailable=true`); subagent gets hint; subagent's `graphify explain X` errors with exit 127; subagent falls back to grep + Read; review proceeds. **Validates graceful CLI-missing fallback.** |
+| 52g | **`/assign` step 3.5 with broken folder (iter1 P0 #1 regression test)** | Run `/pr-autopilot:assign <id>` in repo with `graphify-out/cache/` but no `graphify-out/graph.json` | INFO message echoed (NOT PAUSE), claim file created normally regardless of graphify state. **Validates iter1 P0 #1 fix — `/assign` is always advisory.** |
+| 52h | **Queued-merge wait + graphify state change (iter2 P0 #5 regression test)** | PR with `state.autoMergeQueued=true` (queued by prior tick); user breaks `graphify-out/` between ticks | §0.6 merge-wait short-circuit fires BEFORE §0.6a is reached; merge wait proceeds normally; no graphify notification interrupts the queued-merge resume. **Validates §0.6a placement AFTER §0.6.** |
+
+**v0.5.3 gating subset for "field-validated"** (extends v0.5.2; does not replace):
+
+- Scenarios 52 (happy path) + 52b (auto + missing first-PR INFO) + 52c (always PAUSE) + 52d (broken folder PAUSE in /step) + 52e + 52e-bis (advisory=off regression) + 52g (/assign always advisory) are gating
+- 52b-bis (notice flag scope), 52f (CLI fallback), 52h (queued-merge placement) are recommended but not gating (require setup choreography)
+
+Live verification: 52 expected to validate on first PR in any Asistel-like repo with graphify-out committed. 52b validates on this PR (pr-autopilot has no graphify graph).
+
+---
+
 ## Results (updated as gating scenarios run on real PRs)
 
 ### Step 0 results

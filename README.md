@@ -129,6 +129,7 @@ One-time setup per reviewer you want to enable. See `reviewers/`:
 - [`reviewers/COPILOT-SETUP.md`](reviewers/COPILOT-SETUP.md) — final-pass by default; uses your existing Copilot seat
 - `reviewers/CODEX-SETUP.md` — experimental (Codex Pro CLI sub required); stub in v0.1.0
 - `reviewers/CLAUDE-SELF-SETUP.md` — experimental (uses Claude Code sub); stub in v0.1.0
+- [`reviewers/FLOW-VERIFY-SETUP.md`](reviewers/FLOW-VERIFY-SETUP.md) — behavioural leg (v0.5.4): drives your running app through the user flows the PR touches, instead of reading the diff. Off by default; needs a flow catalog and a runner in your repo.
 
 ## License
 

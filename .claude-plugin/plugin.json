@@ -9,6 +9,9 @@
   "homepage": "https://github.com/MarcinSufa/claude-pr-autopilot",
   "repository": "https://github.com/MarcinSufa/claude-pr-autopilot",
   "license": "MIT",
+  "dependencies": [
+    "feature-dev@claude-plugins-official"
+  ],
   "keywords": [
     "github",
     "pull-request",

@@ -1,6 +1,8 @@
 ---
 name: finish
 description: Post-merge cleanup. After the PR merges (typically via v0.4 automerge), runs /pr-autopilot:finish <id> to update the claim file to `merged`, mirror to ExoVault `done`, update `assignments.yaml` on `main` with merge metadata, and best-effort cleanup of the worktree + local branch. Lists dependent assignments that became READY. Idempotent. Use when - "close the assignment", "PR merged, clean up", "what's next ready".
+argument-hint: "<assignment-id>"
+disable-model-invocation: true
 ---
 
 # /pr-autopilot:finish <ASSIGNMENT_ID>

@@ -1,6 +1,8 @@
 ---
 name: allow
 description: Add a repo to the pr-autopilot auto-trigger allowlist. Use /pr-autopilot:allow <owner/repo> (or no arg for the current repo). The auto-trigger hook only fires for allowlisted repos.
+argument-hint: "[owner/repo]"
+disable-model-invocation: true
 ---
 
 # /pr-autopilot:allow [owner/repo]

@@ -1,6 +1,7 @@
 ---
 name: approve-spec
 description: User-only gate from spec to TDD. Asks the user (AskUserQuestion) to approve, show or reject the reviewed spec; on approve the user runs approve-claim.sh in their own terminal, which writes `approvedAt` + `approvedBy` to the claim file and flips sub-status to `implementing`. The PreToolUse hook (`enforce-spec-gate.sh`) then unblocks writes outside `specs/`. Use when - "approve the spec", "give green light to TDD", "spec is good, proceed".
+disable-model-invocation: true
 ---
 
 # /pr-autopilot:approve-spec

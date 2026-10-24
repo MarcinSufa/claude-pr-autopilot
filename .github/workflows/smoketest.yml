@@ -37,10 +37,12 @@ jobs:
           python3 -c "import json; json.load(open('hooks/hooks.json'))"
           python3 -c "import json; json.load(open('templates/settings-snippet.json'))"
 
-      - name: Validate skills/*/SKILL.md frontmatter (name, description)
+      - name: Validate skills/*/SKILL.md frontmatter (YAML, name, description)
         run: |
+          python3 -m pip install --quiet pyyaml
           python3 - <<'PY'
           import glob, re, sys
+          import yaml
           files = sorted(glob.glob('skills/*/SKILL.md'))
           if not files:
               print('ERROR: no skills/*/SKILL.md found')
@@ -52,6 +54,10 @@ jobs:
               if not m:
                   print(f'ERROR: {path} missing YAML frontmatter'); bad += 1; continue
               fm = m.group(1)
+              try:
+                  data = yaml.safe_load(fm)
+              except yaml.YAMLError as e:
+                  print(f'ERROR: {path} frontmatter is not valid YAML: {e}'); bad += 1; continue
               for field in ('name:', 'description:'):
                   if not re.search(r'^' + field, fm, re.MULTILINE):
                       print(f'ERROR: {path} frontmatter missing {field}'); bad += 1

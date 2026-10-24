@@ -1,6 +1,8 @@
 ---
 name: assign
 description: Atomically claim an assignment from `assignments.yaml`, create a worktree off `origin/main`, write the claim file, and brief the agent. Uses git branch creation as the atomic lock primitive — concurrent calls on the same id are racing on `git worktree add -b`; loser gets a graceful "claimed by X" message. Use when starting work on a pre-declared unit ("claim admin-d1", "start the next ready assignment").
+argument-hint: "[assignment-id]"
+disable-model-invocation: true
 ---
 
 # /pr-autopilot:assign [<assignment-id>]

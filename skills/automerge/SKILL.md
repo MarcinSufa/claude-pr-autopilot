@@ -1,6 +1,8 @@
 ---
 name: automerge
 description: Opt a repo into pr-autopilot safe auto-merge. Use /pr-autopilot:automerge <owner/repo> (or no arg for the current repo). When the loop reaches SUCCESS, autopilot queues a squash merge to the integration branch (dev) — never to master/main/production, always CI-gated. Separate from /pr-autopilot:allow.
+argument-hint: "[owner/repo]"
+disable-model-invocation: true
 ---
 
 # /pr-autopilot:automerge [owner/repo]

@@ -1,6 +1,7 @@
 ---
 name: step
-description: Automated PR review loop. Run /loop /pr-autopilot:step <PR#> after creating a PR; the skill fetches reviews from enabled reviewers, applies fixes or pushes back with reasoning, pushes commits, and waits for re-review. Stops when all enabled per-iteration reviewers report success (default: Cursor score 5/5 + Copilot final-pass 0 unresolved). Ten independent safety stops. Use when - "automate my PR review", "loop until merge-ready", "fix PR review comments automatically".
+description: Automated PR review loop for a GitHub pull request. Run /loop /pr-autopilot:step <PR#> after creating a PR; each tick fetches reviews from the enabled reviewers (Cursor, Copilot, Codex, Copilot SWE agent), applies fixes or pushes back with reasoning, pushes commits, and waits for re-review. Stops when all enabled per-iteration reviewers report success (by default Cursor score 5/5 + Copilot final pass with 0 unresolved threads). Needs at least one per-iteration reviewer (Cursor, Copilot or Codex, all paid); with none it ends ABORT_NO_DRIVER. Ten independent safety stops. Use when - "automate my PR review", "loop until merge-ready", "fix PR review comments automatically", "zautomatyzuj review PR", "popraw komentarze z review", "puść pętlę aż PR będzie gotowy do merge".
+argument-hint: "<PR-number>"
 ---
 
 # /pr-autopilot:step <PR_NUMBER>

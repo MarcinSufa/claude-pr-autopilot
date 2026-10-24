@@ -1,6 +1,7 @@
 ---
 name: pause
 description: Temporarily suppress pr-autopilot auto-trigger without changing the allowlist. Use /pr-autopilot:pause. Re-enable with /pr-autopilot:resume.
+disable-model-invocation: true
 ---
 
 # /pr-autopilot:pause

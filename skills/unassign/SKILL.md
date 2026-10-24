@@ -1,6 +1,8 @@
 ---
 name: unassign
 description: Release an assignment claim WITHOUT merging — agent changed mind, assignment re-classified, deps blocked indefinitely. Removes worktree, deletes branch, resets ExoVault task to `todo`. Confirms destructively (requires AskUserQuestion). Symmetric counterpart to `/assign`. Use when - "abandon this assignment", "release the claim", "I'm not working on X anymore".
+argument-hint: "<assignment-id>"
+disable-model-invocation: true
 ---
 
 # /pr-autopilot:unassign <ASSIGNMENT_ID>

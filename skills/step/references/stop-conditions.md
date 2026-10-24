@@ -22,6 +22,9 @@ Moved from `skills/step/SKILL.md`. Read this when explaining to the user why the
 | Local pre-commit suite failed | 11 | ABORT |
 | `stallTickCap` ticks with same review and zero actions (stall) | 11.5 | PAUSE |
 | Final-pass reviewer disagrees | 9a | PAUSE |
+| **Flow verify (v0.5.4+):** `mode=off`, no catalog, no runner, or diff touches no flow | 9a-bis / Y.9-bis | PASS (SKIPPED, falls through) |
+| **Flow verify:** a touched flow failed (`unexpected > 0`) | 9a-bis / Y.9-bis | PAUSE (comment on PR) |
+| **Flow verify:** app not serving, no `results.json`, flaky, or nothing actually ran | 9a-bis / Y.9-bis | PAUSE (BLOCKED — never counted as passing) |
 | Reviewers green, auto-merge gate fails (not opted-in / paused / base unsafe / not-ready / CI not green) | 9c / Y.10 (`safeAutoMerge` gates 1–5) | SUCCESS_STOP (notify "ready", manual merge) |
 | Reviewers green, all auto-merge gates pass → merge queued, waiting for GitHub | 9c / Y.10 → 0.6 | CONTINUE (wait) |
 | Auto-merge blocked (conflicts / `mergeStateStatus` DIRTY) | 0.6 | STOP (KEEP state) |

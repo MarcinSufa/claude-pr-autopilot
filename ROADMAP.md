@@ -24,7 +24,19 @@ blocklist), CI-gated, queued-vs-merged handled by a merge-wait short-circuit (st
 squash when a repo lacks GitHub auto-merge. Never auto-invokes `/land-and-deploy` (notify + recommend only).
 Spec: docs/superpowers/specs/2026-05-24-pr-autopilot-v0.4-auto-merge-design.md.
 
-## v0.5.2 — Per-reviewer summary table + Gap E probe fix + v0.6 rejection ADR (this patch)
+## v0.5.4 — Flow verification leg (this patch)
+
+Adds a **behavioural** gate alongside the reading reviewers. Every existing leg reads the diff;
+`flowVerify` drives the running app through the user flows the PR touches and gates the auto-merge
+step on the result. Off by default (`flowVerify.mode: "off"`), `final-only` when enabled, shared by
+Mode X (step 9a-bis) and Mode Y (after APPROVE, before `safeAutoMerge`).
+
+Deliberate constraints: never starts or kills a process (a missing app is `BLOCKED`, not a pass);
+judges `results.json` counters rather than the runner's exit code, because runners exit 0 on skips;
+treats flakes and all-skipped runs as `BLOCKED`; sweeps only flows the diff can plausibly have
+broken. Setup: [`reviewers/FLOW-VERIFY-SETUP.md`](reviewers/FLOW-VERIFY-SETUP.md).
+
+## v0.5.2 — Per-reviewer summary table + Gap E probe fix + v0.6 rejection ADR
 Patch release on top of v0.5.1. Three changes in a 3-commit-in-1-PR bundle:
 
 - **Gap E (commit 1)** — new probe case 400 → exit 45 with actionable message for

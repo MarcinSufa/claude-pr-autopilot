@@ -5,7 +5,7 @@
 [![smoketest](https://github.com/MarcinSufa/claude-pr-autopilot/actions/workflows/smoketest.yml/badge.svg)](https://github.com/MarcinSufa/claude-pr-autopilot/actions/workflows/smoketest.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
-[![Status: v0.5.3 (pre-1.0)](https://img.shields.io/badge/status-v0.5.3%20pre--1.0-blue.svg)](docs/DESIGN.md)
+[![Status: v0.5.4 (pre-1.0)](https://img.shields.io/badge/status-v0.5.4%20pre--1.0-blue.svg)](docs/DESIGN.md)
 
 A Claude Code marketplace plugin that closes the PR review→fix loop. Cursor reviews your PR (or Copilot / Codex / Claude-self — configurable), Claude reads each review and either fixes the issue or pushes back with reasoning, then pushes the fix and waits for the next round. Stops when all enabled reviewers report success — or hits one of ten independent safety guards.
 
@@ -143,7 +143,7 @@ v0.5.3 doesn't prescribe an approach — pick what fits your team. Pre-flight `s
 
 ## Status
 
-**v0.5.3 — pre-PR lifecycle + graphify awareness (pre-1.0).** Mode X + Mode Y rotation (v0.2), in-session auto-trigger (v0.3, beta), opt-in dev-only auto-merge (v0.4, beta), the pre-PR lifecycle skills and spec gate (v0.5) and graphify code-graph awareness (v0.5.3) shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them.
+**v0.5.4 — pre-PR lifecycle + graphify awareness (pre-1.0).** Mode X + Mode Y rotation (v0.2), in-session auto-trigger (v0.3, beta), opt-in dev-only auto-merge (v0.4, beta), the pre-PR lifecycle skills and spec gate (v0.5), graphify code-graph awareness (v0.5.3), and the behavioural flow-verification leg (v0.5.4, off by default) shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them.
 
 ## Setup
 
@@ -153,6 +153,7 @@ One-time setup per reviewer you want to enable. See `reviewers/`:
 - [`reviewers/COPILOT-SETUP.md`](reviewers/COPILOT-SETUP.md) — final-pass by default; uses your existing Copilot seat
 - `reviewers/CODEX-SETUP.md` — experimental (Codex Pro CLI sub required); stub in v0.1.0
 - `reviewers/CLAUDE-SELF-SETUP.md` — experimental (uses Claude Code sub); stub in v0.1.0
+- [`reviewers/FLOW-VERIFY-SETUP.md`](reviewers/FLOW-VERIFY-SETUP.md) — behavioural leg (v0.5.4): drives your running app through the user flows the PR touches, instead of reading the diff. Off by default; needs a flow catalog and a runner in your repo.
 
 ## License
 

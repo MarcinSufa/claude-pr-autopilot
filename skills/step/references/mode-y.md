@@ -294,6 +294,16 @@ if pause_verdicts:
   return  # PAUSE (terminate)
 
 if not pushback_verdicts:  # all APPROVE
+  # Y.9-bis — flow verification leg (v0.5.4), after reading legs and before auto-merge.
+  verdict = flowVerifyLeg(pr_number, pr.baseRefName)
+  if verdict.status in ("FAIL", "BLOCKED"):
+    if verdict.status == "FAIL":
+      gh pr comment ${pr_number} --body "${verdict.comment}"
+    push_notification(f"PR #{pr_number} PAUSED",
+                      f"Flow verification {verdict.status}: {verdict.reason}")
+    save_state(STATE_FILE)  # KEEP state for user resume
+    return  # PAUSE
+
   # SUCCESS_STOP → shared auto-merge gate (v0.4). Same gates as Mode X; no Mode Y
   # final-pass in v0.2. Default (no opt-in) path reproduces the old notify+delete,
   # preserving this mode's message via readySummary.

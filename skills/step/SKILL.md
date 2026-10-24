@@ -35,6 +35,13 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
       "codex":      { "mode": "off", "postCommentsToPR": false },
       "claudeSelf": { "enabled": false, "rubricFile": "SELF-REVIEW-RUBRIC.md" }
     },
+    "flowVerify": {
+      "mode": "off",
+      "catalog": "flows.md",
+      "command": "npm run verify:flow",
+      "resultsJson": "test-results-verify/results.json",
+      "baseUrl": "http://localhost:3000"
+    },
     "preCommitProfiles": {
       "default-pnpm": [{"cmd": "pnpm run typecheck"}, {"cmd": "pnpm run lint"}, {"cmd": "pnpm test"}],
       "default-npm":  [{"cmd": "npm run typecheck"},  {"cmd": "npm run lint"},  {"cmd": "npm test"}],
@@ -51,6 +58,8 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 
 **Per-repo pre-commit profile (optional):** `preCommitProfiles` keys are repo basenames; without one, step 11 falls back to `default-<package-manager>` from the lockfile. Example with per-entry `if` conditions: `${CLAUDE_SKILL_DIR}/references/config.md`.
 
+**Flow-verification config (v0.5.4):** `prAutopilot.flowVerify` gates a **behavioural** check on top of the review legs — reviewers read the diff, this one drives the app. `mode: "off"` (the default) skips it entirely, so repos without the harness are unaffected. `mode: "final-only"` runs it once, after every reviewer is green and before the auto-merge gate. It never starts a server and never merges on its own. See [`references/flow-verify.md`](references/flow-verify.md) and [`reviewers/FLOW-VERIFY-SETUP.md`](../../reviewers/FLOW-VERIFY-SETUP.md).
+
 **Auto-merge config (v0.4):** `prAutopilot.autoMerge` tunes the *target* + *method* guards for `safeAutoMerge` (see `references/auto-merge.md`). Safe hardcoded defaults shown above — it works with zero config. The per-repo **opt-in itself is file-based** (`~/.pr-autopilot/automerge-repos`, separate from v0.3's `allowed-repos`); absent ⇒ auto-merge OFF everywhere; the notify-and-stop control flow is unchanged from v0.3 (the notification just adds a "merge manually" hint).
 
 ## Config → algorithm derivation
@@ -66,6 +75,7 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 | `codex.mode=each-iter` | yes | no | yes (`codex exec review --base`) | no | pass/fail |
 | `codex.mode=final-only` | no | yes | yes (one-shot at end) | no | pass/fail |
 | `claudeSelf.enabled=true` | no (final-only by design) | yes | no (internal) | no | 1-5 vs rubric |
+| `flowVerify.mode=final-only` | no (too slow for every iter) | yes | no (internal) | no | `results.json` counters, NOT the exit code |
 
 Copilot has two products (Code Review = `copilot`, SWE Agent = `copilotSwe`) and SWE Agent has two roles (`each-iter` fixer vs `review-score` reviewer). Read `${CLAUDE_SKILL_DIR}/references/config.md` when choosing or explaining reviewer config. If Copilot Code Review does not respond within 10 poll ticks, suggest `copilotSwe` instead.
 
@@ -400,6 +410,19 @@ if all_per_iter_happy AND unresolved_not_ours.length == 0:
         read git diff origin/${pr.baseRefName}..HEAD
         emit 1-5 score against rubric; if < 5 → PAUSE
 
+  # 9a-bis. Flow verification leg (v0.5.4) — behavioural, runs AFTER the reading
+  #         reviewers and BEFORE the auto-merge gate. Every reviewer above reads
+  #         the diff; this one drives the running app. The helper is defined in `references/flow-verify.md`.
+  verdict = flowVerifyLeg(prNumber, pr.baseRefName)
+  if verdict.status == "FAIL":
+    gh pr comment ${prNumber} --body "${verdict.comment}"
+    PushNotification("PAUSE", "flow verification failed: ${verdict.failedFlows}")
+    return  # PAUSE — never merge over a red behavioural check
+  if verdict.status == "BLOCKED":
+    PushNotification("PAUSE", "flow verification could not run: ${verdict.reason}")
+    return  # PAUSE — a check that did not run is not a check that passed
+  # "SKIPPED" (mode off, or repo has no harness) and "PASS" both fall through.
+
   # 9b. All final-pass reviewers clear.
   # 9c. SUCCESS_STOP → hand off to the shared auto-merge gate (v0.4).
   #     With no opt-in (the default), safeAutoMerge's Gate 1 keeps the old
@@ -504,6 +527,7 @@ In `references/*.md`, `<skill-dir>` means `${CLAUDE_SKILL_DIR}` (so the plugin r
 - **Mode Y** (`mode == "Y"`): read `${CLAUDE_SKILL_DIR}/references/mode-y.md` and run `prAutopilotStepModeY(prNumber)` from there.
 - **`safeAutoMerge(prNumber, baseRef, readySummary)`** (SUCCESS_STOP in step 9c and Y.10): read `${CLAUDE_SKILL_DIR}/references/auto-merge.md` and apply its six gates. With no opt-in (the default) it notifies "ready", deletes state and stops.
 - **Why did it stop?** The full stop-condition table is in `${CLAUDE_SKILL_DIR}/references/stop-conditions.md`.
+- **`flowVerifyLeg(prNumber, baseRef)`** (Mode X step 9a-bis and Mode Y Y.9-bis): read `${CLAUDE_SKILL_DIR}/references/flow-verify.md`. Mode off or no harness means SKIPPED; never merges, never starts a server.
 
 ## See also
 
@@ -511,5 +535,6 @@ In `references/*.md`, `<skill-dir>` means `${CLAUDE_SKILL_DIR}` (so the plugin r
 - [`REVIEW-TRIAGE-COPY.md`](../../REVIEW-TRIAGE-COPY.md) — multi-login fetch/classify/reply routine
 - [`reviewers/CURSOR-SETUP.md`](../../reviewers/CURSOR-SETUP.md) — one-time Cursor setup
 - [`reviewers/COPILOT-SETUP.md`](../../reviewers/COPILOT-SETUP.md) — Copilot adapter modes
+- [`reviewers/FLOW-VERIFY-SETUP.md`](../../reviewers/FLOW-VERIFY-SETUP.md) — behavioural flow-verification leg
 - [`EVAL.md`](../../EVAL.md) — test scenarios + Phase 1 gating
 - [`docs/DESIGN.md`](../../docs/DESIGN.md) — full architecture spec

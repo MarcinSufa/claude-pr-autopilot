@@ -386,7 +386,7 @@ if mode == "Y":
 ### 1. Fetch PR state
 
 ```
-pr = gh pr view ${prNumber} --json headRefName,baseRefName,headRefOid,number,state,reviews,statusCheckRollup
+pr = gh pr view ${prNumber} --json headRefName,baseRefName,headRefOid,number,state,reviews
 ```
 
 ### 2. PR lifecycle guard
@@ -418,10 +418,22 @@ if state.fixIterations >= config.fixIterationCap:
 
 `lastHandledHeadOid` was set in step 11 of the PREVIOUS iteration right after we pushed. If current `headRefOid` still matches, no other actor pushed in between — the failed CI is from OUR push.
 
+`gh pr view --json statusCheckRollup` has no `isRequired` field, so the check list comes from `gh pr checks`, which can filter to required checks itself. `ci_checks()` is reused by Y.4.5 and auto-merge Gate 5:
+
 ```
-required_checks = pr.statusCheckRollup | filter where isRequired
-any_failed = required_checks | any where conclusion == "FAILURE"
-any_pending = required_checks | any where state in {QUEUED, IN_PROGRESS, PENDING}
+def ci_checks(prNumber):
+  r = run("gh pr checks ${prNumber} --required --json name,state,bucket")
+  # exit 0 = all required checks finished; exit 8 = some still pending (JSON is still printed)
+  if r.exit == 1 AND r.stderr matches "no required checks reported":
+    # repo has no required checks (no branch protection / rulesets) → use ALL checks
+    r = run("gh pr checks ${prNumber} --json name,state,bucket")
+  if r.exit == 1 AND r.stderr matches "no checks reported":
+    return []          # no CI configured on this PR
+  return parse_json(r.stdout)   # [{name, state, bucket}], bucket ∈ {pass, fail, pending, skipping, cancel}
+
+checks = ci_checks(prNumber)
+any_failed = checks | any where bucket == "fail"
+any_pending = checks | any where bucket == "pending"
 
 if any_failed AND pr.headRefOid == state.lastHandledHeadOid:
   PushNotification("ABORT", "CI failed on our last push; investigate before continuing")
@@ -804,8 +816,7 @@ if not state.resolvedMode:
 # Y.1 — fetch PR state (reuse Mode X step 1)
 pr = gh.pr.view(pr_number, json=[
   "headRefName", "baseRefName", "headRefOid",
-  "number", "state", "comments", "commits",
-  "statusCheckRollup"
+  "number", "state", "comments", "commits"
 ])
 
 # Initialize lastHandledHeadOid on first tick if not set:
@@ -838,9 +849,9 @@ if len(state.commitPushbacks) >= config.fixIterationCap:
   return  # terminate, KEEP state (so user can inspect pushback history)
 
 # Y.4.5 — CI health check (NEW; mirrors Mode X step 5)
-required_checks = [c for c in pr.statusCheckRollup if c.isRequired]
-any_failed = any(c.conclusion == "FAILURE" for c in required_checks)
-any_pending = any(c.state in {"QUEUED", "IN_PROGRESS", "PENDING"} for c in required_checks)
+checks = ci_checks(pr_number)   # defined in Mode X step 5: required checks, else all checks
+any_failed = any(c.bucket == "fail" for c in checks)
+any_pending = any(c.bucket == "pending" for c in checks)
 
 if any_failed and pr.headRefOid == state.lastHandledHeadOid:
   push_notification(
@@ -1050,8 +1061,8 @@ function safeAutoMerge(prNumber, baseRef, readySummary):
     return  # SUCCESS_STOP
 
   # GATE 5 — CI green on current headRefOid (same logic as step 5 / Y.4.5).
-  required_checks = pr.statusCheckRollup | filter where isRequired   # `pr` fetched at step 1 / Y.1
-  if any required check NOT green (conclusion != SUCCESS or still pending):
+  checks = ci_checks(prNumber)   # step 5 helper: required checks, else all checks (re-fetched now)
+  if any check has bucket NOT in {pass, skipping}:   # fail, pending or cancel → not green
     PushNotification("PR #${prNumber} ready", "reviewers green but CI not green — not auto-merging; merge manually after CI passes")
     delete $STATE_FILE
     return  # SUCCESS_STOP

@@ -36,13 +36,6 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
       "claudeSelf": { "enabled": false, "rubricFile": "SELF-REVIEW-RUBRIC.md" }
     },
     "preCommitProfiles": {
-      "exo-vault": [
-        {"cmd": "pnpm run build"},
-        {"cmd": "cd mcp-server && pnpm run build", "if": "git diff --name-only HEAD~1 HEAD | grep -q '^mcp-server/'"},
-        {"cmd": "pnpm run lint"},
-        {"cmd": "pnpm test"},
-        {"cmd": "pnpm exec tsc --noEmit"}
-      ],
       "default-pnpm": [{"cmd": "pnpm run typecheck"}, {"cmd": "pnpm run lint"}, {"cmd": "pnpm test"}],
       "default-npm":  [{"cmd": "npm run typecheck"},  {"cmd": "npm run lint"},  {"cmd": "npm test"}],
       "default-yarn": [{"cmd": "yarn typecheck"},     {"cmd": "yarn lint"},     {"cmd": "yarn test"}]
@@ -53,6 +46,19 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
       "mergeMethod": "squash"
     }
   }
+}
+```
+
+**Per-repo pre-commit profile (optional):** `preCommitProfiles` keys are repo basenames (falls back to `default-<package-manager>` from the lockfile, see step 11). Example for a pnpm monorepo named `my-app`; each entry may carry an `if` shell condition:
+
+```json
+"preCommitProfiles": {
+  "my-app": [
+    {"cmd": "pnpm run build"},
+    {"cmd": "cd server && pnpm run build", "if": "git diff --name-only HEAD~1 HEAD | grep -q '^server/'"},
+    {"cmd": "pnpm run lint"},
+    {"cmd": "pnpm test"}
+  ]
 }
 ```
 

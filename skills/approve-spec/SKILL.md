@@ -74,7 +74,7 @@ Full algorithm + gate strength analysis: `docs/superpowers/specs/2026-05-28-pr-a
    Hard gate: LIFTED — PreToolUse hook will allow Write/Edit outside specs/.
 
    Next steps:
-   1. TDD red → green → refactor per CLAUDE.md rule #4
+   1. TDD red → green → refactor (follow the project's own CLAUDE.md / contributing rules)
    2. When PR opens via `gh pr create`, run `/pr-autopilot:pr-opened <PR#>` to hand off to v0.4 step loop
    3. After PR merges, run `/pr-autopilot:finish <id>` to close the lifecycle
    ```

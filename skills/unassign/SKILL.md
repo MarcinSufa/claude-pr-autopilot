@@ -44,7 +44,8 @@ Housekeeping skill. Symmetric counterpart to `/assign`. **Destructive** — requ
 
 4. **`cd` to main worktree root** (outside target's worktree):
    ```bash
-   MAIN=$(git worktree list | head -1 | awk '{print $1}')
+   # first "worktree <path>" entry is the primary worktree; sed keeps paths with spaces intact
+   MAIN=$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)
    cd "$MAIN"
    ```
 

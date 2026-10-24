@@ -19,7 +19,7 @@ Adds a repository to `~/.pr-autopilot/allowed-repos` so the auto-trigger hook wi
    ```bash
    mkdir -p ~/.pr-autopilot
    touch ~/.pr-autopilot/allowed-repos
-   # $CANON is the nameWithOwner from step 2 (e.g. MarcinSufa/exo-vault), not the raw input
+   # $CANON is the nameWithOwner from step 2 (e.g. octo-org/my-repo), not the raw input
    grep -qxF "$CANON" ~/.pr-autopilot/allowed-repos || echo "$CANON" >> ~/.pr-autopilot/allowed-repos
    ```
 4. Confirm to the user: "Auto-trigger enabled for <owner/repo>. New PRs there will auto-start autopilot (skip with /pr-autopilot:pause; drafts are ignored)." Show the current allowlist: `cat ~/.pr-autopilot/allowed-repos`.

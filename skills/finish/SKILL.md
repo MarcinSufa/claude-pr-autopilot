@@ -42,7 +42,7 @@ The closing skill of the pre-PR lifecycle — paired symmetrically with `/assign
    # Canonical main worktree resolution — first entry in `git worktree list --porcelain`
    # is always the primary worktree (where main lives). Works for multi-worktree setups,
    # symlinks, and paths with spaces.
-   MAIN=$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')
+   MAIN=$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)
    cd "$MAIN"
 
    git fetch origin main

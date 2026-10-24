@@ -34,11 +34,11 @@ chmod +x "$PROBE" 2>/dev/null
 
 # ─── Dependency check ──────────────────────────────────────────────────────
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "✗ python3 required for mock server (winget install Python.Python.3.12 or similar)" >&2
+  echo "✗ python3 required for mock server (sudo apt install python3 / brew install python; Windows: winget install Python.Python.3.12)" >&2
   exit 2
 fi
 if ! command -v jq >/dev/null 2>&1; then
-  echo "✗ jq required by probe (winget install jqlang.jq)" >&2
+  echo "✗ jq required by probe (sudo apt install jq / brew install jq; Windows: winget install jqlang.jq)" >&2
   exit 2
 fi
 if ! command -v curl >/dev/null 2>&1; then

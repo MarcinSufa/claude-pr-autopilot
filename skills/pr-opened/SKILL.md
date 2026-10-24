@@ -1,6 +1,6 @@
 ---
 name: pr-opened
-description: Bridge from pre-PR (v0.5) to post-PR (v0.4 step loop). After `gh pr create`, run /pr-autopilot:pr-opened <PR#> to record the PR linkage in the claim file, flip sub-status to `pr_review_requested`, and prompt the user to start the v0.4 review loop. Small skill; the value is the audit-trail entry. Use when - "PR created, hand off to autopilot", "bridge to step loop".
+description: Bridge from pre-PR (v0.5) to post-PR (v0.4 step loop). After `gh pr create`, run /pr-autopilot:pr-opened <PR#> to record the PR linkage in the claim file, flip sub-status to `pr_review_requested`, and prompt the user to start the v0.4 review loop. Small skill; the value is the audit-trail entry. Use when - "PR created, hand off to autopilot", "bridge to step loop", "PR założony, przekaż do autopilota", "podepnij PR pod pętlę review".
 argument-hint: "<PR-number>"
 ---
 

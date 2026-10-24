@@ -27,7 +27,7 @@ Surfaced by v0.1.0 dry-run test (2026-05-23) — all CLIs must be on PATH:
 gh --version && jq --version && git --version && gh auth status
 ```
 
-Expected: all four succeed. If `jq` is missing on Windows: `winget install jqlang.jq` and restart shell. If `gh` is unauthenticated: `gh auth login`. See README → Prerequisites for full install table.
+Expected: all four succeed. If `jq` is missing: `sudo apt install jq` (Linux), `brew install jq` (macOS) or `winget install jqlang.jq` (Windows), then restart the shell. If `gh` is unauthenticated: `gh auth login`. See README → Prerequisites for full install table.
 
 ### Step 0.B — Reviewer login discovery
 

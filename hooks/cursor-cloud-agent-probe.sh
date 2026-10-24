@@ -28,7 +28,7 @@ set -u  # Intentionally NOT `set -e` — we capture curl/jq exit codes and trans
 
 # ─── Dependency checks ─────────────────────────────────────────────────────
 if ! command -v jq >/dev/null 2>&1; then
-  echo "jq required (install: winget install jqlang.jq)" >&2
+  echo "jq required (install: sudo apt install jq / brew install jq; Windows: winget install jqlang.jq)" >&2
   exit 44
 fi
 if ! command -v curl >/dev/null 2>&1; then

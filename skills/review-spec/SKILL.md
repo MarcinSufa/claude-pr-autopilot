@@ -216,8 +216,9 @@ Now dispatch all enabled adapters in parallel via a single Agent-tool-call messa
 **Opt-in PAID (if env set):**
 - **codex-exec** if `OPENAI_API_KEY` set OR `which codex` succeeds:
   ```bash
-  codex exec --json --sandbox read-only --ask-for-approval never \
-    --output-last-message "/tmp/codex-review-<id>-iter<n>.md" \
+  # -a/--ask-for-approval is a top-level codex flag (before `exec`), not an `exec` flag.
+  codex -a never exec --json --sandbox read-only \
+    --output-last-message "${TMPDIR:-/tmp}/codex-review-<id>-iter<n>.md" \
     "$(cat <prompt-template-with-spec-path>)"
   ```
 - **cursor-cloud-agent** (ONLY if probe returned 0):

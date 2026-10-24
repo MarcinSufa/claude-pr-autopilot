@@ -67,7 +67,7 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 | `copilotSwe.mode=each-iter` | yes | no | yes (`gh pr comment "@copilot please review"`) | no — top-level conversational comments | Claude judgment on comment body |
 | `copilotSwe.mode=review-score` | yes | no | yes (`@copilot please review` mention, **review-only**) | no — top-level conversational comment | `Readiness: N/5` regex (`scoreRegex`) |
 | `copilotSwe.mode=final-only` | no | yes | yes (same mention, one-shot at end) | no | Claude judgment on comment body |
-| `codex.mode=each-iter` | yes | no | yes (`codex review --diff`) | no | pass/fail |
+| `codex.mode=each-iter` | yes | no | yes (`codex exec review --base`) | no | pass/fail |
 | `codex.mode=final-only` | no | yes | yes (one-shot at end) | no | pass/fail |
 | `claudeSelf.enabled=true` | no (final-only by design) | yes | no (internal) | no | 1-5 vs rubric |
 
@@ -471,7 +471,10 @@ for r in per_iter_reviewers:
           #  each-iter is the Mode Y fixer, handled in its own flow.)
           gh pr comment ${prNumber} --body $'@copilot please review this PR. Review ONLY — do NOT push code changes.\n\nList any blocking issues, then end with a line in EXACTLY this format:\n\nReadiness: X/5\n\nwhere 1 = not mergeable and 5 = ready to merge.'
       "codex":
-        codex review --diff origin/${pr.baseRefName}..HEAD --format json > /tmp/codex_review_${prNumber}.json
+        # codex-cli ≥0.159: `review` takes --base/--commit/--uncommitted (no --diff, no --format);
+        # `codex exec review` adds -o/--output-last-message for the final review text.
+        codex exec review --base origin/${pr.baseRefName} \
+          -o "${TMPDIR:-/tmp}/codex_review_${prNumber}.md" > /dev/null
 ```
 
 ### 6. Fetch outcomes from per-iter reviewers + unresolved threads
@@ -497,7 +500,8 @@ for r in per_iter_reviewers:
         outcomes["copilotSwe"].score = regex match config.reviewers.copilotSwe.scoreRegex against latestCommentBody
       # else (each-iter/final-only): isSuccess determined by Claude reading the comment body — see step 9
     "codex":
-      outcomes["codex"].result = parse pass/fail from /tmp/codex_review_${prNumber}.json
+      # Read the review text; "pass" = Codex reports no actionable (P0/P1) findings, else "fail".
+      outcomes["codex"].result = judge pass/fail from "${TMPDIR:-/tmp}/codex_review_${prNumber}.md"
 
 # Unified threads fetch — only for reviewers whose adapter.postsThreads == true
 github_reviewer_logins = [config.reviewers[r.name].login for r in per_iter_reviewers if r.derivation.postsThreads]
@@ -581,8 +585,9 @@ if all_per_iter_happy AND unresolved_not_ours.length == 0:
         sleep 5 minutes (or pollInterval * 4); fetch Copilot threads
         if any unresolved Copilot thread → PAUSE
       "codex":
-        codex review --diff origin/${pr.baseRefName}..HEAD --format json
-        if pass → continue; if fail → PAUSE
+        codex exec review --base origin/${pr.baseRefName} \
+          -o "${TMPDIR:-/tmp}/codex_final_${prNumber}.md" > /dev/null
+        if the review text reports no actionable (P0/P1) findings → continue; else → PAUSE
       "claudeSelf":
         read SELF-REVIEW-RUBRIC.md (from config.reviewers.claudeSelf.rubricFile)
         read git diff origin/${pr.baseRefName}..HEAD

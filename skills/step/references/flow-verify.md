@@ -83,4 +83,3 @@ Design notes:
 - **No server lifecycle.** This leg never starts, restarts, or kills a process. That is a
   deliberate constraint, not an omission.
 - **Never merges.** It gates `safeAutoMerge`; it cannot approve or merge anything itself.
-

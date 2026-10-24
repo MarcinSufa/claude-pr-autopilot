@@ -5,7 +5,7 @@
 [![smoketest](https://github.com/MarcinSufa/claude-pr-autopilot/actions/workflows/smoketest.yml/badge.svg)](https://github.com/MarcinSufa/claude-pr-autopilot/actions/workflows/smoketest.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
-[![Status: v0.4.0 (pre-1.0)](https://img.shields.io/badge/status-v0.4.0%20pre--1.0-blue.svg)](docs/DESIGN.md)
+[![Status: v0.5.4 (pre-1.0)](https://img.shields.io/badge/status-v0.5.4%20pre--1.0-blue.svg)](docs/DESIGN.md)
 
 A Claude Code marketplace plugin that closes the PR review→fix loop. Cursor reviews your PR (or Copilot / Codex / Claude-self — configurable), Claude reads each review and either fixes the issue or pushes back with reasoning, then pushes the fix and waits for the next round. Stops when all enabled reviewers report success — or hits one of ten independent safety guards.
 
@@ -15,10 +15,10 @@ A Claude Code marketplace plugin that closes the PR review→fix loop. Cursor re
 
 Required CLIs on your PATH — the skill's pre-flight ABORTs cleanly if any are missing:
 
-| Tool | Windows | macOS | Linux (apt) |
+| Tool | Linux (apt) | macOS | Windows |
 |---|---|---|---|
-| `gh` | `winget install GitHub.cli` | `brew install gh` | `sudo apt install gh` |
-| `jq` | `winget install jqlang.jq` | `brew install jq` | `sudo apt install jq` |
+| `gh` | `sudo apt install gh` | `brew install gh` | `winget install GitHub.cli` |
+| `jq` | `sudo apt install jq` | `brew install jq` | `winget install jqlang.jq` |
 | `git` | (usually pre-installed) | (usually pre-installed) | (usually pre-installed) |
 
 After install, restart your shell so the binaries are on PATH. Then run `gh auth login` if you haven't already.
@@ -29,6 +29,15 @@ After install, restart your shell so the binaries are on PATH. Then run `gh auth
 /plugin marketplace add MarcinSufa/claude-pr-autopilot
 /plugin install pr-autopilot@claude-pr-autopilot
 ```
+
+### What needs a paid account
+
+| Feature | Works with no paid reviewer? | Paid services it can use |
+|---|---|---|
+| `/pr-autopilot:step` (PR review loop) | **No.** It needs at least one per-iteration reviewer. With none enabled, pre-flight ends with `ABORT_NO_DRIVER` ("no per-iter reviewer or fixer enabled; nothing would drive the loop"). | Cursor (Pro, $20/mo, the default reviewer), GitHub Copilot (a seat; Code Review or the SWE Agent), Codex CLI (paid subscription). Claude-self review is final-pass only, so it cannot drive the loop on its own. |
+| `/pr-autopilot:review-spec` (spec review) | **Yes.** With zero keys it runs 2 Claude subagents (code reviewer + adversarial) and prints a copy-paste prompt for an optional manual Composer review. | Codex CLI (`OPENAI_API_KEY`) and Cursor Cloud Agent (`CURSOR_API_KEY`, paid Cursor plan) are added only when their keys and plan checks pass. |
+
+`/review-spec`'s code-reviewer subagent comes from the official `feature-dev` plugin, which `pr-autopilot` declares as a dependency (`feature-dev@claude-plugins-official`). If that agent is not available, the skill falls back to a `general-purpose` subagent.
 
 ## Usage (Phase 1)
 
@@ -88,6 +97,21 @@ Default (repo not opted in) = OFF, behavior identical to v0.3.
 
 **Beta until the live exo-vault dogfood** (queue → merge → cleanup on a real dev-targeted PR) flips it to GA.
 
+## Pre-PR lifecycle (v0.5)
+
+Optional skills for teams that plan work as a list of assignments and want a reviewed spec before any code is written. They need an `assignments.yaml` at the repo root (template: [`templates/assignments.yaml.template`](templates/assignments.yaml.template)) and the ExoVault MCP server for the task mirror (`EXOVAULT_VAULT_ID`).
+
+| Skill | What it does |
+|---|---|
+| `/pr-autopilot:assign [<id>]` | Claims an assignment, creates a worktree off `origin/main`, writes the claim file `.claude/assignment-claims/<id>.json`, and asks the agent to draft a spec first. |
+| `/pr-autopilot:review-spec` | Reviews the spec and appends the results to the claim file (`--bootstrap <path>` reviews any spec without a claim file). |
+| `/pr-autopilot:approve-spec` | User-only gate. You approve the spec by running `approve-claim.sh <id>` in your own terminal (it needs a real TTY, so the agent cannot run it); the script records `approvedAt`/`approvedBy` and moves the claim to `implementing`. |
+| `/pr-autopilot:pr-opened <PR#>` | After `gh pr create`: records the PR in the claim file and hands off to the `/pr-autopilot:step` loop. |
+| `/pr-autopilot:finish <id>` | After merge: marks the claim `merged`, updates `assignments.yaml` on `main`, cleans up the worktree and lists assignments that became ready. |
+| `/pr-autopilot:unassign <id>` | Releases a claim without merging (removes the worktree and branch, resets the task to `todo`). |
+
+**Spec gate.** Merge [`templates/settings-snippet.json`](templates/settings-snippet.json) into the project's `.claude/settings.json` to enable `hooks/enforce-spec-gate.sh` (PreToolUse on `Write|Edit|MultiEdit|NotebookEdit|Bash`). In a repo with claim files it denies writes outside `specs/` until the claim is approved, and denies agent edits of the approval fields. It is a guard rail against accidents, not a security boundary: the script header lists what it cannot catch (interpreters, `dd`, `git apply`, `eval` and similar).
+
 ## Code knowledge graph awareness (v0.5.3+)
 
 If your repo has a graphify-built knowledge graph at `graphify-out/graph.json`, pr-autopilot's dispatched `/review-spec` subagents (claude-code-reviewer + claude-self-review) AND the in-loop `/step` triage will prefer querying the graph (`graphify explain "<symbol>"`) over grep'ing source files for symbol-lookup questions. Estimated token reduction is significant but **not yet measured** — see EVAL scenarios 52* for the validation plan.
@@ -119,7 +143,7 @@ v0.5.3 doesn't prescribe an approach — pick what fits your team. Pre-flight `s
 
 ## Status
 
-**v0.4.0 — safe auto-merge (pre-1.0).** Mode X + Mode Y rotation (v0.2), in-session auto-trigger (v0.3, beta), and opt-in dev-only auto-merge (v0.4, beta) shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them.
+**v0.5.4 — pre-PR lifecycle + graphify awareness (pre-1.0).** Mode X + Mode Y rotation (v0.2), in-session auto-trigger (v0.3, beta), opt-in dev-only auto-merge (v0.4, beta), the pre-PR lifecycle skills and spec gate (v0.5), graphify code-graph awareness (v0.5.3), and the behavioural flow-verification leg (v0.5.4, off by default) shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them.
 
 ## Setup
 

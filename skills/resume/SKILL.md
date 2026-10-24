@@ -1,6 +1,7 @@
 ---
 name: resume
 description: Re-enable pr-autopilot auto-trigger after a pause. Use /pr-autopilot:resume.
+disable-model-invocation: true
 ---
 
 # /pr-autopilot:resume

@@ -1,6 +1,8 @@
 ---
 name: automerge
 description: Opt a repo into pr-autopilot safe auto-merge. Use /pr-autopilot:automerge <owner/repo> (or no arg for the current repo). When the loop reaches SUCCESS, autopilot queues a squash merge to the integration branch (dev) — never to master/main/production, always CI-gated. Separate from /pr-autopilot:allow.
+argument-hint: "[owner/repo]"
+disable-model-invocation: true
 ---
 
 # /pr-autopilot:automerge [owner/repo]
@@ -19,7 +21,7 @@ Adds a repository to `~/.pr-autopilot/automerge-repos` so that when the review l
    ```bash
    mkdir -p ~/.pr-autopilot
    touch ~/.pr-autopilot/automerge-repos
-   # $CANON is the nameWithOwner from step 2 (e.g. MarcinSufa/exo-vault), not the raw input
+   # $CANON is the nameWithOwner from step 2 (e.g. octo-org/my-repo), not the raw input
    grep -qxF "$CANON" ~/.pr-autopilot/automerge-repos || echo "$CANON" >> ~/.pr-autopilot/automerge-repos
    ```
 4. Confirm to the user: "Auto-merge enabled for <owner/repo>. When the loop reaches SUCCESS on a PR targeting `dev`, autopilot will queue a squash merge (never to master/main/production; CI-gated). Pause anytime with /pr-autopilot:pause." Show the current allowlist: `cat ~/.pr-autopilot/automerge-repos`.

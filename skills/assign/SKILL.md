@@ -1,6 +1,8 @@
 ---
 name: assign
 description: Atomically claim an assignment from `assignments.yaml`, create a worktree off `origin/main`, write the claim file, and brief the agent. Uses git branch creation as the atomic lock primitive — concurrent calls on the same id are racing on `git worktree add -b`; loser gets a graceful "claimed by X" message. Use when starting work on a pre-declared unit ("claim admin-d1", "start the next ready assignment").
+argument-hint: "[assignment-id]"
+disable-model-invocation: true
 ---
 
 # /pr-autopilot:assign [<assignment-id>]
@@ -79,10 +81,11 @@ Full algorithm + state machine + claim file schema: `docs/superpowers/specs/2026
      STOP: `"Assignment <id> claimed by <agentId> since <claimedAt> (subStatus: <subStatus>). Use /pr-autopilot:unassign <id> if you want to release."`
    - If exit ≠ 0 with worktree-already-exists → recovery branch (EVAL 47):
      ```bash
-     EXISTING=$(git worktree list | grep ".claude/worktrees/<id>" | awk '{print $1}')
-     if [ -d "$EXISTING/.claude/assignment-claims/<id>.json" ]; then
+     # --porcelain keeps paths with spaces intact ("worktree <path>" lines)
+     EXISTING=$(git worktree list --porcelain | sed -n 's/^worktree //p' | grep "/.claude/worktrees/<id>$" | head -1)
+     if [ -f "$EXISTING/.claude/assignment-claims/<id>.json" ]; then
        STATE=$(jq -r '.subStatus' "$EXISTING/.claude/assignment-claims/<id>.json")
-       echo "Existing worktree found at $EXISTING (subStatus=$STATE). Continue there? (Cmd+I to cd)"
+       echo "Existing worktree found at $EXISTING (subStatus=$STATE). Continue there (cd into it)?"
      else
        echo "Orphan worktree at $EXISTING without claim file. Run /pr-autopilot:unassign <id> to clean up, then retry."
      fi
@@ -137,7 +140,7 @@ Full algorithm + state machine + claim file schema: `docs/superpowers/specs/2026
 
    Step 1: WRITE THE SPEC at `specs/<YYYY-MM-DD>-<id>.md`. This is the only file you may modify until approval.
    Step 2: When done, run `/pr-autopilot:review-spec` to dispatch reviewers.
-   Step 3: After 0 P0 findings, ask Marcin to run `/pr-autopilot:approve-spec`.
+   Step 3: After 0 P0 findings, ask the user to run `/pr-autopilot:approve-spec`.
    Step 4: Only after sub-status flips to `implementing` will the PreToolUse hook unblock Write/Edit outside `specs/`.
 
    ⚠️ The hook will BLOCK any Write/Edit outside `specs/` until you've completed the spec lifecycle.

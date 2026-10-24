@@ -1,6 +1,7 @@
 ---
 name: step
-description: Automated PR review loop. Run /loop /pr-autopilot:step <PR#> after creating a PR; the skill fetches reviews from enabled reviewers, applies fixes or pushes back with reasoning, pushes commits, and waits for re-review. Stops when all enabled per-iteration reviewers report success (default: Cursor score 5/5 + Copilot final-pass 0 unresolved). Ten independent safety stops. Use when - "automate my PR review", "loop until merge-ready", "fix PR review comments automatically".
+description: Automated PR review loop for a GitHub pull request. Run /loop /pr-autopilot:step <PR#> after creating a PR; each tick fetches reviews from the enabled reviewers (Cursor, Copilot, Codex, Copilot SWE agent), applies fixes or pushes back with reasoning, pushes commits, and waits for re-review. Stops when all enabled per-iteration reviewers report success (by default Cursor score 5/5 + Copilot final pass with 0 unresolved threads). Needs at least one per-iteration reviewer (Cursor, Copilot or Codex, all paid); with none it ends ABORT_NO_DRIVER. Ten independent safety stops. Use when - "automate my PR review", "loop until merge-ready", "fix PR review comments automatically", "zautomatyzuj review PR", "popraw komentarze z review", "puść pętlę aż PR będzie gotowy do merge".
+argument-hint: "<PR-number>"
 ---
 
 # /pr-autopilot:step <PR_NUMBER>
@@ -42,13 +43,6 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
       "baseUrl": "http://localhost:3000"
     },
     "preCommitProfiles": {
-      "exo-vault": [
-        {"cmd": "pnpm run build"},
-        {"cmd": "cd mcp-server && pnpm run build", "if": "git diff --name-only HEAD~1 HEAD | grep -q '^mcp-server/'"},
-        {"cmd": "pnpm run lint"},
-        {"cmd": "pnpm test"},
-        {"cmd": "pnpm exec tsc --noEmit"}
-      ],
       "default-pnpm": [{"cmd": "pnpm run typecheck"}, {"cmd": "pnpm run lint"}, {"cmd": "pnpm test"}],
       "default-npm":  [{"cmd": "npm run typecheck"},  {"cmd": "npm run lint"},  {"cmd": "npm test"}],
       "default-yarn": [{"cmd": "yarn typecheck"},     {"cmd": "yarn lint"},     {"cmd": "yarn test"}]
@@ -62,9 +56,11 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 }
 ```
 
-**Flow-verification config (v0.5.4):** `prAutopilot.flowVerify` gates a **behavioural** check on top of the review legs — reviewers read the diff, this one drives the app. `mode: "off"` (the default) skips it entirely, so repos without the harness are unaffected. `mode: "final-only"` runs it once, after every reviewer is green and before the auto-merge gate. It never starts a server and never merges on its own. See [`reviewers/FLOW-VERIFY-SETUP.md`](../../reviewers/FLOW-VERIFY-SETUP.md).
+**Per-repo pre-commit profile (optional):** `preCommitProfiles` keys are repo basenames; without one, step 11 falls back to `default-<package-manager>` from the lockfile. Example with per-entry `if` conditions: `${CLAUDE_SKILL_DIR}/references/config.md`.
 
-**Auto-merge config (v0.4):** `prAutopilot.autoMerge` tunes the *target* + *method* guards for `safeAutoMerge` (see §"Auto-merge"). Safe hardcoded defaults shown above — it works with zero config. The per-repo **opt-in itself is file-based** (`~/.pr-autopilot/automerge-repos`, separate from v0.3's `allowed-repos`); absent ⇒ auto-merge OFF everywhere; the notify-and-stop control flow is unchanged from v0.3 (the notification just adds a "merge manually" hint).
+**Flow-verification config (v0.5.4):** `prAutopilot.flowVerify` gates a **behavioural** check on top of the review legs — reviewers read the diff, this one drives the app. `mode: "off"` (the default) skips it entirely, so repos without the harness are unaffected. `mode: "final-only"` runs it once, after every reviewer is green and before the auto-merge gate. It never starts a server and never merges on its own. See [`references/flow-verify.md`](references/flow-verify.md) and [`reviewers/FLOW-VERIFY-SETUP.md`](../../reviewers/FLOW-VERIFY-SETUP.md).
+
+**Auto-merge config (v0.4):** `prAutopilot.autoMerge` tunes the *target* + *method* guards for `safeAutoMerge` (see `references/auto-merge.md`). Safe hardcoded defaults shown above — it works with zero config. The per-repo **opt-in itself is file-based** (`~/.pr-autopilot/automerge-repos`, separate from v0.3's `allowed-repos`); absent ⇒ auto-merge OFF everywhere; the notify-and-stop control flow is unchanged from v0.3 (the notification just adds a "merge manually" hint).
 
 ## Config → algorithm derivation
 
@@ -76,19 +72,12 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 | `copilotSwe.mode=each-iter` | yes | no | yes (`gh pr comment "@copilot please review"`) | no — top-level conversational comments | Claude judgment on comment body |
 | `copilotSwe.mode=review-score` | yes | no | yes (`@copilot please review` mention, **review-only**) | no — top-level conversational comment | `Readiness: N/5` regex (`scoreRegex`) |
 | `copilotSwe.mode=final-only` | no | yes | yes (same mention, one-shot at end) | no | Claude judgment on comment body |
-| `codex.mode=each-iter` | yes | no | yes (`codex review --diff`) | no | pass/fail |
+| `codex.mode=each-iter` | yes | no | yes (`codex exec review --base`) | no | pass/fail |
 | `codex.mode=final-only` | no | yes | yes (one-shot at end) | no | pass/fail |
 | `claudeSelf.enabled=true` | no (final-only by design) | yes | no (internal) | no | 1-5 vs rubric |
 | `flowVerify.mode=final-only` | no (too slow for every iter) | yes | no (internal) | no | `results.json` counters, NOT the exit code |
 
-**⚠ Important: Copilot has TWO products** — `copilot` (Copilot Code Review) and `copilotSwe` (Copilot SWE Agent). They are DIFFERENT:
-- **Code Review** posts structured line-level threads. Triggered by adding `Copilot` via the requested-reviewers API (the `@copilot` mention does NOT trigger this). May require specific repo setup (rulesets or manual reviewer add) and a paid Copilot tier with Code Review enabled.
-- **SWE Agent** posts conversational top-level comments. Triggered by `@copilot please review` mention. Works out-of-box on most repos with Copilot installed. Applies line-level fixes by pushing commits (verified on exo-vault PR #128 — 7 fixes + a test file). Posts a conversational top-level comment alongside the commits.
-Per real-world testing (2026-05-23), SWE Agent fires more reliably on private repos. Code Review may need additional setup most users don't have. Default to `copilotSwe` if Code Review doesn't respond within 10 poll-ticks.
-
-**SWE Agent serves two distinct roles, selected by `copilotSwe.mode`:**
-- **`each-iter` — fixer (Mode Y).** The mention asks Copilot to review *and fix*; it pushes commits, Claude reviews them. Copilot drives the change.
-- **`review-score` — scoring reviewer (Mode X).** The mention asks Copilot to **review only (no code changes)** and end with `Readiness: X/5`; the loop parses that score with `copilotSwe.scoreRegex` and gates on `== 5`, exactly like `cursor`. **Claude is the fixer.** Use this when you have a Copilot seat but no Cursor Pro and want a Cursor-style 1–5 gate. (`final-only` is a one-shot conversational sanity check, judged by Claude.)
+Copilot has two products (Code Review = `copilot`, SWE Agent = `copilotSwe`) and SWE Agent has two roles (`each-iter` fixer vs `review-score` reviewer). Read `${CLAUDE_SKILL_DIR}/references/config.md` when choosing or explaining reviewer config. If Copilot Code Review does not respond within 10 poll ticks, suggest `copilotSwe` instead.
 
 ## Mode derivation
 
@@ -96,18 +85,11 @@ Per real-world testing (2026-05-23), SWE Agent fires more reliably on private re
 
 | `primaryFixer` | Resolved mode | Notes |
 |---|---|---|
-| `"claude"` | X | ABORT if `copilotSwe.mode == "each-iter"` (would conflict — see rule below). Otherwise standard Mode X. |
+| `"claude"` | X | ABORT if `copilotSwe.mode == "each-iter"` (would conflict — see `references/config.md`). Otherwise standard Mode X. |
 | `"copilotSwe"` | Y | Force Mode Y; derive_mode returns "Y", pre-flight validates copilotSwe.mode == each-iter (ABORTs there if not). |
-| `"auto"` (default) | derived | Inspect reviewer config — see rules below. |
+| `"auto"` (default) | derived | Inspect reviewer config — `derive_mode()` below. |
 
-**`primaryFixer="claude"` + `copilotSwe.mode="each-iter"` rule:** ABORT with message — "primaryFixer=claude conflicts with copilotSwe.mode=each-iter. Either set copilotSwe.mode=off (or final-only) or change primaryFixer to copilotSwe or auto." Same reasoning as `auto` case 3 below: silently ignoring a reviewer config wastes user's paid quota.
-
-**`auto` resolution rules** (first match wins):
-
-1. If `copilotSwe.mode == "each-iter"` AND `cursor.enabled == false` AND `copilot.mode != "each-iter"` AND `codex.mode != "each-iter"` → **Mode Y**
-2. Else if any of {`cursor.enabled`, `copilot.mode == "each-iter"`, `codex.mode == "each-iter"`, `copilotSwe.mode == "review-score"`} AND `copilotSwe.mode != "each-iter"` → **Mode X** (`review-score` makes SWE Agent a per-iter *reviewer*; Claude fixes)
-3. Else if BOTH a per-iter reviewer AND `copilotSwe.mode == "each-iter"` are enabled → **ABORT** with message: "ambiguous fixer config. Set `primaryFixer` to 'claude' or 'copilotSwe' explicitly to resolve."
-4. Else (no per-iter anything) → **ABORT** with message: "no per-iter reviewer or fixer enabled; nothing would drive the loop"
+The prose form of these rules (including the `primaryFixer="claude"` + `each-iter` conflict) is in `${CLAUDE_SKILL_DIR}/references/config.md`; `derive_mode()` below is authoritative.
 
 ```python
 function derive_mode(config):
@@ -133,46 +115,16 @@ function derive_mode(config):
 ## Pre-flight: config validation
 
 ```python
-# Detect mode (see §"Mode derivation" above)
 mode = derive_mode(config)
-
-if mode == ABORT_CONFIG:
-  # Two ABORT_CONFIG sub-cases — distinguish by primaryFixer setting:
-  if config.primaryFixer == "claude":
-    # claude + copilotSwe.mode=each-iter conflict
-    push_notification(
-      "config error",
-      "primaryFixer=claude conflicts with copilotSwe.mode=each-iter. Either set copilotSwe.mode=off (or final-only) or change primaryFixer to copilotSwe or auto."
-    )
-  else:
-    # auto with both swe_each and any_xreviewer set — ambiguous
-    push_notification(
-      "config error",
-      "ambiguous fixer config. Set primaryFixer to 'claude' or 'copilotSwe' explicitly to resolve."
-    )
-  return  # terminate
-
 if mode == ABORT_NO_DRIVER:
   push_notification("config error", "no per-iter reviewer or fixer enabled; nothing would drive the loop")
+  return  # terminate (no ScheduleWakeup)
+if mode == ABORT_CONFIG
+   or (mode == "X" and no reviewer in {cursor, copilot, codex, copilotSwe(review-score)} has enabledForEachIter)
+   or (mode == "Y" and config.reviewers.copilotSwe.mode != "each-iter"):
+  # exact config-error messages for each case: ${CLAUDE_SKILL_DIR}/references/config.md §"Pre-flight config errors"
+  push_notification("config error", <message for that case>)
   return  # terminate
-
-# reachable when primaryFixer=claude is forced with no per-iter reviewer enabled
-if mode == "X":
-  if not any(getattr(r, "enabledForEachIter", False)
-             for r in [config.reviewers.cursor,
-                       config.reviewers.copilot,
-                       config.reviewers.codex,
-                       config.reviewers.copilotSwe]):  # copilotSwe counts only in review-score mode
-    push_notification(
-      "config error",
-      "Mode X requires at least one per-iter reviewer in {cursor, copilot, codex, copilotSwe(review-score)}"
-    )
-    return  # terminate
-
-if mode == "Y":
-  if config.reviewers.copilotSwe.mode != "each-iter":
-    push_notification("config error", "Mode Y requires copilotSwe.mode=each-iter")
-    return  # terminate
 ```
 
 ## Algorithm: prAutopilotStep(prNumber)
@@ -185,7 +137,7 @@ These checks were added after a v0.1.0 dry-run surfaced silent fallthroughs when
 # 0.1 Required CLIs present
 for cmd in gh jq git; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
-    PushNotification("ABORT", "Required CLI not on PATH: $cmd. See reviewers/CURSOR-SETUP.md or README.md for install instructions.")
+    PushNotification("ABORT", "Required CLI not on PATH: $cmd. See README.md in the pr-autopilot plugin for install instructions.")
     return  # terminate (no ScheduleWakeup)
   fi
 done
@@ -208,17 +160,8 @@ if ! gh pr view ${prNumber} --json number >/dev/null 2>&1; then
   return  # terminate
 fi
 
-# 0.4b — graphify code knowledge graph filesystem detection (v0.5.3+)
-# Pure filesystem check; NO state interaction yet (state loads in §0.5).
-# Also caches GRAPHIFY_OWNER / GRAPHIFY_REPO for reuse in §0.5 STATE_FILE construction
-# and §0.6a per-repo notice flag (avoids triple `gh repo view` per tick).
-if [ -f "graphify-out/graph.json" ]; then
-  _graphifyFsState="present"
-elif [ -d "graphify-out" ]; then
-  _graphifyFsState="broken"   # folder exists but no graph.json — last `graphify extract` failed
-else
-  _graphifyFsState="absent"
-fi
+# 0.4b — cache owner/repo for §0.5 STATE_FILE and the graphify notice flag (§0.6a);
+# avoids triple `gh repo view` per tick. The graphify filesystem check is in references/graphify.md.
 GRAPHIFY_OWNER=$(gh repo view --json owner --jq '.owner.login')
 GRAPHIFY_REPO=$(gh repo view --json name --jq '.name')
 GRAPHIFY_NOTICE_FLAG="$HOME/.pr-autopilot/${GRAPHIFY_OWNER}-${GRAPHIFY_REPO}-graphify-notice.flag"
@@ -234,169 +177,31 @@ if [ -f "$STATE_FILE" ]; then state = read $STATE_FILE; else state = createNew(p
 
 **Auto-trigger provenance:** When this step was reached because the auto-trigger hook nudged you (the invoking prompt is `/loop /pr-autopilot:step <N>` originating from the hook's `additionalContext`, not a manual user invocation), set on the new state: `"autoTriggered": true, "triggerSource": "posttooluse-hook"`. For manual invocations, set `"autoTriggered": false`. This is informational only (telemetry / debugging) and does not change loop behavior.
 
-**v1→v2 state migration (run immediately after load):** if a loaded state file predates the v2 schema, map the old `pushbackReplies` key onto `threadPushbacks` so Mode X does not lose pushback history. (Mode Y handles v1 state separately — it ABORTs; see Y.0.5.)
+#### State schema
 
-```
-if state.pushbackReplies AND NOT state.threadPushbacks:
-  state.threadPushbacks = state.pushbackReplies   # carry Mode X history forward
-# `pushbackReplies` is no longer written; it is dropped entirely in v0.3
-```
-
-State schema:
-
-```json
-{
-  "stateSchemaVersion": 4,
-  "prNumber": 0,
-  "repo": "<owner>/<name>",
-  "headRef": "<branch>",
-  "resolvedMode": "X" | "Y",
-  "createdAt": "<iso>",
-  "updatedAt": "<iso>",
-
-  "fixIterations": 0,
-  "pollTicksWithoutReview": 0,
-  "pollTicksWithoutActivity": 0,
-  "ticksWithoutProgress": 0,
-
-  "autoMergeQueued": false,
-  "autoMergeAt": "<iso>",
-  "pollTicksWhileQueued": 0,
-  "lastHandledHeadOid": "<sha>",
-  "lastSeenReviewId": "<gh-review-id>",
-  "lastTriggerAt": "<iso>",
-
-  "threadPushbacks": [
-    {"threadId": "<id>", "iteration": 0, "reason": "..."}
-  ],
-
-  "commitPushbacks": [
-    {
-      "iteration": 1,
-      "atOid": "<sha>",
-      "pushbacks": [{"file": "...", "range": "...", "reason": "..."}]
-    }
-  ],
-
-  "handledOids": ["<sha>", "..."],
-  "handledCommentIds": [123456],
-  "reviewIteration": 0,
-
-  "graphifyAvailable": false,
-  "graphifyBuiltAtCommit": ""
-}
-```
-
-**Key changes from v0.1 state:**
-
-- `stateSchemaVersion: 3` — bumped from v2 (v0.2) for the v0.4 auto-merge fields. Migration is purely additive: a v2 file loads with `autoMergeQueued: false`, `pollTicksWhileQueued: 0` (defaults); no fresh start needed. The v1 handling below is unchanged.
-- `stateSchemaVersion` absent (implicit v1) — treated as v1 (Mode X) and requires a fresh start if the user switches to Mode Y. The `state.stateSchemaVersion is None` Mode-Y ABORT guard (Y.0.5) still keys off "field absent", so the v2→v3 bump does not affect it.
-- **Auto-merge fields (v0.4):** `autoMergeQueued` — set true once `gh pr merge` is called; read by **step 0.6** (short-circuit into merge-wait) and **gate 6** (avoid re-queue). `autoMergeAt` — ISO timestamp the merge was queued (telemetry). `pollTicksWhileQueued` — **dedicated** counter incremented ONLY in the step-0.6 merge-wait branch, compared to `pollTickCap` for stuck-queue detection; NOT `pollTicksWithoutReview` / `pollTicksWithoutActivity` (those drive the review lifecycle). State is deleted only when step 0.6 observes `MERGED`/`CLOSED`, never when the merge is merely queued — "queued" ≠ "merged".
-- **Graphify awareness fields (v0.5.3, schema v4):** `graphifyAvailable: false`, `graphifyBuiltAtCommit: ""` — set by new §0.6a check (filesystem detection of `graphify-out/graph.json` + jq-typed `built_at_commit` extraction). Migration is purely additive: a v3 state file loads with both defaulted; no fresh start needed. The `state.stateSchemaVersion is None` Mode-Y ABORT guard (Y.0.5) is unaffected — v3→v4 is additive only, the guard fires on field absent, not on field value. `graphifyBuiltAtCommit` is NOT used to gate behavior in v0.5.3 (persisted for v0.5.4 `minimumStaleness` ancestry check).
-- `resolvedMode` — persisted on first tick; mode-drift guard (Y.0.5) aborts if config-derived mode differs from stored mode.
-- `pushbackReplies` (v0.1) → **split into** `threadPushbacks` (Mode X, was Mode X-only in practice anyway) and `commitPushbacks` (Mode Y new).
-- `handledOids`, `handledCommentIds`, `lastTriggerAt`, `pollTicksWithoutActivity`, `reviewIteration` — all Mode Y additions.
-- `handledOids` and `handledCommentIds` persist as JSON arrays but are loaded into sets at runtime (see Y.0 set-conversion lines).
-
-**Backwards-compat:** Mode X reads/writes `threadPushbacks` (renamed from `pushbackReplies`). When a v1 state file is loaded, the migration step in `### 0.5 Load state` maps `pushbackReplies` onto `threadPushbacks` so no history is lost; `pushbackReplies` is no longer written and is dropped entirely in v0.3.
-
-**Migration decision:** v1 state files (no `stateSchemaVersion` field) are treated as Mode X; if the current derived mode is Y, ABORT with a message telling the user to delete the stale state file to start fresh in Mode Y.
+Current `stateSchemaVersion` is 4. If the loaded file has an older or missing `stateSchemaVersion`, apply the v1→v2 migration in `${CLAUDE_SKILL_DIR}/references/state-schema.md` right after loading. Read the same file when creating a new state file, migrating an older one, or when unsure what a field means. v2/v3 files load additively (missing fields default); a v1 file (no `stateSchemaVersion`) is treated as Mode X, and Mode Y ABORTs on it (Y.0).
 
 ### 0.6 Merge-wait short-circuit (v0.4 — runs BEFORE Mode dispatch)
 
-If a previous tick queued an auto-merge (`state.autoMergeQueued == true`), this tick is waiting for GitHub to **complete** the queued merge — not for reviewers. Short-circuit here, *before* the Mode dispatch, so neither Mode X (step 9a final-pass) nor Mode Y (Y.5 `@copilot` re-trigger, Y.6 idle-counting) re-runs review logic on a PR that is merely waiting to merge. Placement is load-bearing: `safeAutoMerge` is called from BOTH modes, so a queued **Mode Y** loop must be caught here too — and running before Mode dispatch also pre-empts the generic Y.2 `MERGED` cleanup so the tailored "merged → run /land-and-deploy" message wins.
-
-```
-if state.autoMergeQueued == true:
-  pr = gh pr view ${prNumber} --json state,isDraft,mergeStateStatus,baseRefName
-  if pr.state == "MERGED":
-    delete $STATE_FILE
-    PushNotification("PR #${prNumber} merged → ${pr.baseRefName}", "Run /land-and-deploy for ${pr.baseRefName}→master + deploy.")
-    return  # SUCCESS, terminate
-  if pr.state == "CLOSED":
-    delete $STATE_FILE
-    PushNotification("PR #${prNumber} closed without merge", "auto-merge abandoned")
-    return  # terminate
-  if pr.mergeStateStatus == "DIRTY":                                   # DIRTY = GitHub's merge-conflict state. There is NO "CONFLICTING" enum value. BLOCKED (branch protection) falls through to the stuck-cap below.
-    PushNotification("PR #${prNumber} auto-merge blocked (conflicts)", "resolve, then re-run /pr-autopilot:step ${prNumber}")
-    return  # STOP, KEEP state (see "Recovery" in §Error handling)
-  state.pollTicksWhileQueued += 1
-  if state.pollTicksWhileQueued >= config.pollTickCap:                 # stuck (e.g. branch protection needs human review)
-    PushNotification("PR #${prNumber} auto-merge still pending", "after ${config.pollTickCap} ticks — check PR / branch protection")
-    saveState($STATE_FILE)
-    return  # STOP, KEEP state
-  saveState($STATE_FILE)
-  ScheduleWakeup(config.pollIntervalSeconds, "/loop /pr-autopilot:step ${prNumber}", "waiting for queued auto-merge to complete")
-  return  # still queued — wait; skip steps 1-11 AND Mode dispatch
-```
+If `state.autoMergeQueued == true`, read `${CLAUDE_SKILL_DIR}/references/auto-merge.md` §"0.6 Merge-wait short-circuit" and follow it. It always returns (wait, stop or done) and never falls through to 0.6a or Mode dispatch.
 
 ### 0.6a graphify advisory dispatch (v0.5.3+)
 
-Placed AFTER §0.6 merge-wait short-circuit so queued-merge ticks are NEVER disturbed by graphify notifications. Reads `_graphifyFsState` cached in §0.4b. Runs BEFORE Mode dispatch so both Mode X and Mode Y get a consistent `state.graphifyAvailable`.
-
-```python
-# 0.6a — graphify state + advisory (runs AFTER §0.6, BEFORE Mode dispatch)
-
-cfg_advisory = config.graphify.advisory  # "auto" (default) | "always" | "off"
-
-# advisory=off short-circuits at TOP — skips ALL filesystem dispatches.
-# Defends advisory=off + broken folder from firing PAUSE.
-if cfg_advisory == "off":
-  state.graphifyAvailable = false
-  goto __graphify_advisory_done__   # fall through to Mode dispatch
-
-# advisory in {"auto", "always"} — apply filesystem state from §0.4b
-case _graphifyFsState of:
-
-  "present":
-    state.graphifyAvailable = true
-    # Hardened jq with type check — defends against future graphify versions emitting
-    # an object {} or null for .built_at_commit (current Asistel-verified value: real SHA).
-    BUILT_AT=$(jq -r 'if (.built_at_commit | type) == "string" then .built_at_commit else "" end' graphify-out/graph.json 2>/dev/null || echo "")
-    state.graphifyBuiltAtCommit = "$BUILT_AT"
-    # NOT used to gate behavior in v0.5.3 — persisted for v0.5.4 minimumStaleness ancestry check.
-
-  "broken":
-    # Rationale: broken folder indicates a failed prior build — the graph state is
-    # indeterminate. `advisory=auto` still PAUSEs here (asymmetric vs the absent case
-    # which only INFOs) because continuing the loop with unknown graph state is less
-    # safe than blocking once with an actionable rebuild message. `advisory=off`
-    # short-circuited above and never reaches this branch.
-    state.graphifyAvailable = false
-    PushNotification("PR #${prNumber} PAUSED — graphify build incomplete", "graphify-out/ exists but graph.json is missing (last `graphify extract` may have failed). Run `graphify extract . --backend deepseek` to rebuild, then re-run /pr-autopilot:step ${prNumber}.")
-    saveState($STATE_FILE)
-    return  # PAUSE; KEEP state
-
-  "absent":
-    state.graphifyAvailable = false
-    if cfg_advisory == "always":
-      PushNotification("PR #${prNumber} PAUSED — graphify required but missing", "graphify.advisory=always but no graphify-out/graph.json found. Run `/graphify .` first, then re-run /pr-autopilot:step ${prNumber}. To disable strict mode set graphify.advisory=auto in ~/.claude/settings.json.")
-      saveState($STATE_FILE)
-      return  # PAUSE; KEEP state
-    else:  # cfg_advisory == "auto"
-      # Per-repo notice flag (NOT per-PR) — uses $GRAPHIFY_NOTICE_FLAG cached in §0.4b
-      if [ ! -f "$GRAPHIFY_NOTICE_FLAG" ]; then
-        PushNotification("INFO: graphify recommendation", "This repo has no graphify code knowledge graph. Run `/graphify .` once for token-reduction during PR review loops. (See README §'Code knowledge graph awareness'.)")
-        touch "$GRAPHIFY_NOTICE_FLAG"
-      fi
-      # fall through normally — loop continues
-
-__graphify_advisory_done__:
-```
+If `config.graphify.advisory == "off"`: set `state.graphifyAvailable = false` and continue. Otherwise (`"auto"`, the default, or `"always"`) read `${CLAUDE_SKILL_DIR}/references/graphify.md` and follow it; it may PAUSE.
 
 **Mode dispatch** — after pre-flight resolves `mode` and loads state, route to the Mode Y algorithm or fall through to Mode X:
 
 ```python
 # After pre-flight resolves `mode`, the mode-drift guard, AND step 0.6:
 if mode == "Y":
-  return prAutopilotStepModeY(prNumber)   # see "Algorithm: Mode Y" below
+  return prAutopilotStepModeY(prNumber)   # read ${CLAUDE_SKILL_DIR}/references/mode-y.md
 # else fall through to Mode X (steps 1-11.5 unchanged)
 ```
 
 ### 1. Fetch PR state
 
 ```
-pr = gh pr view ${prNumber} --json headRefName,baseRefName,headRefOid,number,state,reviews,statusCheckRollup
+pr = gh pr view ${prNumber} --json headRefName,baseRefName,headRefOid,number,state,reviews
 ```
 
 ### 2. PR lifecycle guard
@@ -428,10 +233,22 @@ if state.fixIterations >= config.fixIterationCap:
 
 `lastHandledHeadOid` was set in step 11 of the PREVIOUS iteration right after we pushed. If current `headRefOid` still matches, no other actor pushed in between — the failed CI is from OUR push.
 
+`gh pr view --json statusCheckRollup` has no `isRequired` field, so the check list comes from `gh pr checks`, which can filter to required checks itself. `ci_checks()` is reused by Y.4.5 and auto-merge Gate 5:
+
 ```
-required_checks = pr.statusCheckRollup | filter where isRequired
-any_failed = required_checks | any where conclusion == "FAILURE"
-any_pending = required_checks | any where state in {QUEUED, IN_PROGRESS, PENDING}
+def ci_checks(prNumber):
+  r = run("gh pr checks ${prNumber} --required --json name,state,bucket")
+  # exit 0 = all required checks finished; exit 8 = some still pending (JSON is still printed)
+  if r.exit == 1 AND r.stderr matches "no required checks reported":
+    # repo has no required checks (no branch protection / rulesets) → use ALL checks
+    r = run("gh pr checks ${prNumber} --json name,state,bucket")
+  if r.exit == 1 AND r.stderr matches "no checks reported":
+    return []          # no CI configured on this PR
+  return parse_json(r.stdout)   # [{name, state, bucket}], bucket ∈ {pass, fail, pending, skipping, cancel}
+
+checks = ci_checks(prNumber)
+any_failed = checks | any where bucket == "fail"
+any_pending = checks | any where bucket == "pending"
 
 if any_failed AND pr.headRefOid == state.lastHandledHeadOid:
   PushNotification("ABORT", "CI failed on our last push; investigate before continuing")
@@ -469,7 +286,10 @@ for r in per_iter_reviewers:
           #  each-iter is the Mode Y fixer, handled in its own flow.)
           gh pr comment ${prNumber} --body $'@copilot please review this PR. Review ONLY — do NOT push code changes.\n\nList any blocking issues, then end with a line in EXACTLY this format:\n\nReadiness: X/5\n\nwhere 1 = not mergeable and 5 = ready to merge.'
       "codex":
-        codex review --diff origin/${pr.baseRefName}..HEAD --format json > /tmp/codex_review_${prNumber}.json
+        # codex-cli ≥0.159: `review` takes --base/--commit/--uncommitted (no --diff, no --format);
+        # `codex exec review` adds -o/--output-last-message for the final review text.
+        codex exec review --base origin/${pr.baseRefName} \
+          -o "${TMPDIR:-/tmp}/codex_review_${prNumber}.md" > /dev/null
 ```
 
 ### 6. Fetch outcomes from per-iter reviewers + unresolved threads
@@ -495,7 +315,8 @@ for r in per_iter_reviewers:
         outcomes["copilotSwe"].score = regex match config.reviewers.copilotSwe.scoreRegex against latestCommentBody
       # else (each-iter/final-only): isSuccess determined by Claude reading the comment body — see step 9
     "codex":
-      outcomes["codex"].result = parse pass/fail from /tmp/codex_review_${prNumber}.json
+      # Read the review text; "pass" = Codex reports no actionable (P0/P1) findings, else "fail".
+      outcomes["codex"].result = judge pass/fail from "${TMPDIR:-/tmp}/codex_review_${prNumber}.md"
 
 # Unified threads fetch — only for reviewers whose adapter.postsThreads == true
 github_reviewer_logins = [config.reviewers[r.name].login for r in per_iter_reviewers if r.derivation.postsThreads]
@@ -532,6 +353,8 @@ threads = threads_raw | jq '
 ```
 
 ### 8. Poll-tick counter
+
+There is no step 7: the numbering has skipped it since v0.1 and is kept so the stop-condition table, EVAL.md and docs that cite steps 8–12 stay valid.
 
 ```
 any_reviewer_has_reviewed = any(outcomes[r.name].hasReviewed for r in per_iter_reviewers)
@@ -579,16 +402,17 @@ if all_per_iter_happy AND unresolved_not_ours.length == 0:
         sleep 5 minutes (or pollInterval * 4); fetch Copilot threads
         if any unresolved Copilot thread → PAUSE
       "codex":
-        codex review --diff origin/${pr.baseRefName}..HEAD --format json
-        if pass → continue; if fail → PAUSE
+        codex exec review --base origin/${pr.baseRefName} \
+          -o "${TMPDIR:-/tmp}/codex_final_${prNumber}.md" > /dev/null
+        if the review text reports no actionable (P0/P1) findings → continue; else → PAUSE
       "claudeSelf":
-        read SELF-REVIEW-RUBRIC.md (from config.reviewers.claudeSelf.rubricFile)
+        read ${CLAUDE_SKILL_DIR}/../../SELF-REVIEW-RUBRIC.md (config.reviewers.claudeSelf.rubricFile, relative to the plugin root)
         read git diff origin/${pr.baseRefName}..HEAD
         emit 1-5 score against rubric; if < 5 → PAUSE
 
   # 9a-bis. Flow verification leg (v0.5.4) — behavioural, runs AFTER the reading
   #         reviewers and BEFORE the auto-merge gate. Every reviewer above reads
-  #         the diff; this one drives the running app.
+  #         the diff; this one drives the running app. The helper is defined in `references/flow-verify.md`.
   verdict = flowVerifyLeg(prNumber, pr.baseRefName)
   if verdict.status == "FAIL":
     gh pr comment ${prNumber} --body "${verdict.comment}"
@@ -616,11 +440,11 @@ if all_per_iter_happy AND unresolved_not_ours.length == 0:
 
 > Before judging reviewer comments about symbol X, query `graphify explain "X"` to see X's connections/community. Use `graphify path "X" "Y"` for dependency-validity questions. Only `Read` source files when graphify returns insufficient context.
 
-Invoke the routine in `REVIEW-TRIAGE-COPY.md` with:
+Invoke the routine in `${CLAUDE_SKILL_DIR}/../../REVIEW-TRIAGE-COPY.md` with:
 
 - `threads = unresolved_not_ours`
 - `reviewerLogins = github_reviewer_logins`
-- `pushbackRubric = read PUSHBACK.md`
+- `pushbackRubric = read ${CLAUDE_SKILL_DIR}/../../PUSHBACK.md`
 - `mode = "unattended"`
 
 ```
@@ -696,580 +520,14 @@ ScheduleWakeup(delaySeconds=config.pollIntervalSeconds,
 return  # loop continues
 ```
 
-## Algorithm: Mode Y — prAutopilotStepModeY(prNumber)
+## Algorithm: Mode Y and auto-merge
 
-### Mode Y loop overview
+In `references/*.md`, `<skill-dir>` means `${CLAUDE_SKILL_DIR}` (so the plugin root is `${CLAUDE_SKILL_DIR}/../..`).
 
-```
-                       ┌─────────────────────────────────┐
-                       │  /pr-autopilot:step <PR#>       │
-                       │  (one tick, called by /loop)    │
-                       └─────────────────┬───────────────┘
-                                         │
-                                         v
-              Step Y.0:   pre-flight (mode-aware — see §"Pre-flight fix")
-                                         │
-                                         v
-              Step Y.0.5: mode-drift guard (see §"State schema")
-                                         │
-                                         v
-              Step Y.1:   fetch PR state (same as Mode X step 1)
-                                         │
-                                         v
-              Step Y.2:   lifecycle guard (same as Mode X step 2)
-                                         │
-                                         v
-              Step Y.3:   branch protection guard (same as Mode X step 3)
-                                         │
-                                         v
-              Step Y.4:   pushback-iteration cap (counter increments
-                          on Claude pushback comments, NOT commits)
-                                         │
-                                         v
-              Step Y.4.5: CI health check (NEW — mirror Mode X step 5)
-                          ── if required checks failed on
-                              lastHandledHeadOid (= last SWE commit
-                              we reviewed) → ABORT
-                          ── if any pending → CONTINUE wait
-                                         │
-                                         v
-              Step Y.5:   trigger SWE Agent ONLY IF never triggered
-                          (no @copilot mention from us in PR comments)
-                          ── trigger present already → skip to Y.6
-                          ── never triggered → post @copilot once,
-                              set lastTriggerAt, CONTINUE wait
-                                         │
-                                         v
-              Step Y.6:   detect SWE Agent activity since last handled
-                          (new commits OR new top-level comments
-                          since handledOids / handledCommentIds)
-                                         │
-                                         v
-              Step Y.7:   classify SWE Agent output
-                           ├─ refusal comment ("I cannot...") → ABORT
-                           ├─ new commits → step Y.8
-                           ├─ approval prose AND headRefOid unchanged
-                           │   since lastTriggerAt → step Y.10
-                           │   with PAUSE-by-default (see §note)
-                           ├─ approval prose AND headRefOid changed →
-                           │   step Y.8 (review the new commits first)
-                           └─ nothing new → idle: increment counter, save, CONTINUE wait
-                                         │
-                                         v
-              Step Y.8:   review SWE Agent's commits against PUSHBACK.md
-                          per-hunk verdict (one of):
-                           ├─ APPROVE  — no concerns
-                           ├─ PUSHBACK — minor concern, will be
-                           │             included in re-trigger
-                           └─ PAUSE    — behavior change / safety
-                                         concern; terminate, notify
-                                         │
-                                         v
-              Step Y.9:   post structured review comment with
-                          per-hunk verdicts (audit trail)
-                                         │
-                                         v
-              Step Y.10:  aggregate verdict
-                           ├─ any PAUSE → PAUSE (terminate, notify,
-                           │              KEEP state file)
-                           ├─ all APPROVE → SUCCESS_STOP (terminate,
-                           │                DELETE state file)
-                           └─ any PUSHBACK → post explicit @copilot
-                                             re-trigger referencing
-                                             this iteration's comment,
-                                             then CONTINUE
-                                         │
-                                         v
-              Step Y.11:  save state, ScheduleWakeup(pollInterval, ...)
-                          (or terminate if SUCCESS_STOP / PAUSE / ABORT)
-```
-
-### Helper functions (Mode Y)
-
-```python
-def is_refusal(body: str) -> bool:
-    """True if SWE Agent declined to act."""
-    return bool(re.search(r"(?i)(i cannot|i('m| am) unable|not able to|can't proceed|outside.*scope)", body))
-
-def is_approval_prose(body: str) -> bool:
-    """True if SWE Agent expressed approval without listing action items."""
-    return bool(re.search(r"(?i)(lgtm|looks good|no issues|ready to merge|approved|no changes needed)", body))
-```
-
-### Step-by-step (pseudocode)
-
-```python
-# Y.0 — pre-flight (see §"Pre-flight fix" below for mode-aware check)
-
-# state and STATE_FILE are loaded by the outer dispatcher (### 0.5 Load state) before this function is called; `mode` is in scope from the outer pre-flight.
-
-# JSON arrays load as lists; treat the handled-id collections as sets for O(1) membership + .update()
-state.handledOids = set(state.handledOids)
-state.handledCommentIds = set(state.handledCommentIds)
-
-# v1 state file (pre-v2 schema) reaching the Mode Y path must not silently adopt Mode Y
-if state.stateSchemaVersion is None:
-  push_notification("ABORT", "Stale v1 state file detected. Delete ~/.pr-autopilot/<owner>-<repo>-<pr>.json to start fresh in Mode Y.")
-  return  # terminate, KEEP state file so user can inspect
-
-# Y.0.5 — mode-drift guard
-if state.resolvedMode and state.resolvedMode != mode:
-  push_notification(
-    "ABORT",
-    f"mode drifted: state={state.resolvedMode}, current config={mode}. "
-    f"Either restore the original config or delete {STATE_FILE} to start fresh."
-  )
-  return  # terminate, KEEP state file (user must resolve)
-
-if not state.resolvedMode:
-  state.resolvedMode = mode  # first tick — persist
-
-# Y.1 — fetch PR state (reuse Mode X step 1)
-pr = gh.pr.view(pr_number, json=[
-  "headRefName", "baseRefName", "headRefOid",
-  "number", "state", "comments", "commits",
-  "statusCheckRollup"
-])
-
-# Initialize lastHandledHeadOid on first tick if not set:
-# baseline is the PR HEAD before our first @copilot trigger
-if not state.lastHandledHeadOid:
-  state.lastHandledHeadOid = pr.headRefOid
-
-# Y.2 — lifecycle guard (reuse Mode X step 2)
-if pr.state in {CLOSED, MERGED}:
-  delete(STATE_FILE)
-  push_notification(f"PR #{pr_number} {pr.state}", "loop done; state cleaned up")
-  return  # terminate
-
-# Y.3 — branch protection (reuse Mode X step 3)
-if pr.headRefName in {"dev", "master", "main"}:
-  push_notification("ABORT", "refusing to operate on direct dev/master/main PR")
-  delete(STATE_FILE)
-  return  # terminate
-
-# Y.4 — pushback-iteration cap
-# (Mode Y bounded resource is Claude's pushback count, not Claude commits —
-#  Claude never commits in Mode Y. SWE Agent's pushes are limited by GitHub/Copilot
-#  tier quota, not our cap.)
-if len(state.commitPushbacks) >= config.fixIterationCap:
-  push_notification(
-    "ABORT",
-    f"{config.fixIterationCap} pushback cap reached; "
-    f"SWE Agent and Claude are not converging — manual review required"
-  )
-  return  # terminate, KEEP state (so user can inspect pushback history)
-
-# Y.4.5 — CI health check (NEW; mirrors Mode X step 5)
-required_checks = [c for c in pr.statusCheckRollup if c.isRequired]
-any_failed = any(c.conclusion == "FAILURE" for c in required_checks)
-any_pending = any(c.state in {"QUEUED", "IN_PROGRESS", "PENDING"} for c in required_checks)
-
-if any_failed and pr.headRefOid == state.lastHandledHeadOid:
-  push_notification(
-    "ABORT",
-    f"CI failed on SWE Agent's last commit ({pr.headRefOid[:7]}). "
-    f"Investigate before continuing."
-  )
-  return  # terminate, KEEP state
-
-if any_pending:
-  save_state(STATE_FILE)
-  schedule_wakeup(config.pollIntervalSeconds, ...)
-  return  # CONTINUE — wait for CI to settle
-
-# Y.5 — trigger SWE Agent ONLY IF never triggered
-# (anti-spam fix from 2nd code review Blocker 1)
-# guard: lastTriggerAt is None means we have never posted a trigger
-if state.lastTriggerAt is None:
-  gh.pr.comment(pr_number, body="@copilot please review and fix any issues")
-  state.lastTriggerAt = now()
-  save_state(STATE_FILE)
-  schedule_wakeup(config.pollIntervalSeconds, ...)
-  return  # waiting for SWE Agent's first response
-
-# Y.6 — detect SWE Agent activity since last handled
-swe_login = config.reviewers.copilotSwe.login  # "copilot-swe-agent"
-new_commits = [
-  c for c in pr.commits
-  if c.author.login == swe_login
-  and c.oid not in state.handledOids
-]
-new_comments = [
-  c for c in pr.comments
-  if c.author.login == swe_login
-  and c.databaseId not in state.handledCommentIds
-  and c.createdAt > state.lastTriggerAt
-]
-
-# Y.7 — classify SWE Agent output
-if any(is_refusal(c.body) for c in new_comments):
-  refused_msg = next(c.body for c in new_comments if is_refusal(c.body))
-  push_notification("ABORT", f"SWE Agent refused: {refused_msg[:200]}")
-  delete(STATE_FILE)
-  return  # terminate
-
-if not new_commits and not new_comments:
-  state.pollTicksWithoutActivity += 1
-  if state.pollTicksWithoutActivity >= config.pollTickCap:
-    push_notification(
-      "ABORT",
-      f"SWE Agent inactive for {config.pollTickCap} ticks "
-      f"after @copilot trigger; check Copilot quota / setup"
-    )
-    delete(STATE_FILE)
-    return  # terminate
-
-  save_state(STATE_FILE)
-  schedule_wakeup(config.pollIntervalSeconds, ...)
-  return  # waiting
-
-# Reset idle counter — we have activity
-state.pollTicksWithoutActivity = 0
-
-if new_commits:
-  goto Y_8_review_commits
-
-# else: only comments, no commits
-if any(is_approval_prose(c.body) for c in new_comments):
-  if pr.headRefOid == state.lastHandledHeadOid:
-    # SWE Agent approved without changing anything since loop start.
-    # PR #127's pattern (PR body said "deliberate smells").
-    # Default to PAUSE for safety (2nd code review Medium #8).
-    state.handledCommentIds.update([c.databaseId for c in new_comments])
-    push_notification(
-      f"PR #{pr_number} PAUSED",
-      f"SWE Agent approved without commits (headRefOid unchanged). "
-      f"This is the 'PR body framed as deliberate' pattern — confirm manually."
-    )
-    save_state(STATE_FILE)
-    return  # PAUSE, KEEP state
-  else:
-    # head changed since we last handled — someone else pushed, review what's new
-    # head changed without new SWE commits in our filter — capture all unhandled commits so Y.8 tracks them
-    new_commits = [c for c in pr.commits if c.oid not in state.handledOids]
-    goto Y_8_review_commits
-
-# Neither commit nor approval-prose comment — log and idle
-state.handledCommentIds.update([c.databaseId for c in new_comments])
-save_state(STATE_FILE)
-schedule_wakeup(config.pollIntervalSeconds, ...)
-return  # CONTINUE
-
-# === Y.8 — review SWE Agent's commits against PUSHBACK.md ===
-Y_8_review_commits:
-verdicts = []  # list of (file, hunk_range, verdict, reason)
-diff = git.diff(state.lastHandledHeadOid, pr.headRefOid)
-
-for hunk in parse_diff_hunks(diff):
-  verdict, reason = apply_pushback_rubric(hunk, rubric_file="PUSHBACK.md")
-  # verdict in {APPROVE, PUSHBACK, PAUSE}
-  verdicts.append((hunk.file, hunk.range, verdict, reason))
-
-# Mark these commits handled BEFORE the verdict-driven actions
-state.lastHandledHeadOid = pr.headRefOid
-state.handledOids.update([c.oid for c in new_commits])
-state.handledCommentIds.update([c.databaseId for c in new_comments])
-
-# Y.9 — post structured review comment (audit trail on PR)
-state.reviewIteration += 1  # 1-based: first review iteration is "1"
-comment_body = format_verdict_comment(verdicts, iteration=state.reviewIteration)
-gh.pr.comment(pr_number, body=comment_body)
-
-# Y.10 — aggregate verdict
-pause_verdicts = [v for v in verdicts if v[2] == PAUSE]
-pushback_verdicts = [v for v in verdicts if v[2] == PUSHBACK]
-
-if pause_verdicts:
-  push_notification(
-    f"PR #{pr_number} PAUSED",
-    f"Behavior-change / safety concern: {pause_verdicts[0][3][:200]}"
-  )
-  save_state(STATE_FILE)  # KEEP state for user resume
-  return  # PAUSE (terminate)
-
-if not pushback_verdicts:  # all APPROVE
-  # Flow verification leg (v0.5.4) — same helper as Mode X step 9a-bis, same
-  # placement rule: after the reading legs, before the auto-merge gate.
-  verdict = flowVerifyLeg(pr_number, pr.baseRefName)
-  if verdict.status in ("FAIL", "BLOCKED"):
-    if verdict.status == "FAIL":
-      gh pr comment ${pr_number} --body "${verdict.comment}"
-    push_notification(f"PR #{pr_number} PAUSED",
-                      f"Flow verification {verdict.status}: {verdict.reason}")
-    save_state(STATE_FILE)  # KEEP state for user resume
-    return  # PAUSE
-
-  # SUCCESS_STOP → shared auto-merge gate (v0.4). Same gates as Mode X; no Mode Y
-  # final-pass in v0.2. Default (no opt-in) path reproduces the old notify+delete,
-  # preserving this mode's message via readySummary.
-  return safeAutoMerge(
-    pr_number, pr.baseRefName,
-    readySummary=f"Mode Y: SWE Agent fixes APPROVED by Claude (iteration {state.reviewIteration})"
-  )
-
-# else: pushback_verdicts non-empty — re-trigger SWE Agent
-# (fix from 2nd code review Blocker 2 — structured review comment alone
-#  doesn't wake SWE Agent; needs explicit @copilot mention)
-state.commitPushbacks.append({
-  "iteration": state.reviewIteration,
-  "atOid": pr.headRefOid,
-  "pushbacks": [
-    {"file": v[0], "range": v[1], "reason": v[3]}
-    for v in pushback_verdicts
-  ]
-})
-gh.pr.comment(
-  pr_number,
-  body=f"@copilot please address the pushback items in the review above (iteration {state.reviewIteration})"
-)
-state.lastTriggerAt = now()
-
-# Y.11 — save state, schedule next tick
-save_state(STATE_FILE)
-schedule_wakeup(config.pollIntervalSeconds, ...)
-return  # CONTINUE
-```
-
-### Mode Y design notes
-
-**Why no final-pass in Mode Y v0.2** (resolves Blocker 5): Mode X step 9a runs final-pass reviewers (claudeSelf, Codex, Copilot Code Review) after primary success. Adding final-pass to Mode Y SUCCESS_STOP creates a multi-reviewer orchestration problem (PUSHBACK rubric applied to commits vs threads, different success signals to aggregate). Defer to v0.3 alongside the auto-trigger work — v0.3 owns reviewer-orchestration improvements.
-
-**Why pushback counter, not commit counter:** SWE Agent's pushes count against ITS own iteration cap (managed by GitHub/Copilot tier limits), not Claude's. Claude's bounded resource in Mode Y is "how many times have I posted pushback comments" — that's what `fixIterationCap` protects against (a ping-pong loop where SWE Agent keeps pushing changes that don't address Claude's concerns). `reviewIteration` and `len(commitPushbacks)` differ by one only when the most recent review was all-APPROVE — they otherwise increment together.
-
-**The "approval prose without commits → PAUSE-by-default" branch** (resolves Medium #8) handles the case where SWE Agent posts "LGTM" without pushing anything. PR #127 worked because the body said "deliberate smells" — without that signal, "LGTM with no changes" is too weak a signal to auto-succeed on. Default to PAUSE; user confirms manually.
-
-**The `is_refusal` and `is_approval_prose` heuristics** are simple regex over comment body, defined in the Helper functions (Mode Y) subsection above; simple regex over the comment body.
-
-## Flow verification: `flowVerifyLeg(prNumber, baseRef)` (v0.5.4)
-
-Shared by Mode X and Mode Y. Returns `{status, reason, failedFlows, comment}` where `status` is
-one of `SKIPPED` / `PASS` / `FAIL` / `BLOCKED`.
-
-Every other leg in this loop reads the diff. This one drives the running application and asks a
-different question: do the user flows this PR touches still work? Setup and adoption:
-[`reviewers/FLOW-VERIFY-SETUP.md`](../../reviewers/FLOW-VERIFY-SETUP.md).
-
-```
-cfg = config.flowVerify
-
-# Gate 1 — opt-in. Absent config or mode "off" ⇒ SKIPPED. Repos without the harness
-#          must be unaffected by this leg existing.
-if cfg == null OR cfg.mode == "off":
-  return {status: "SKIPPED", reason: "flowVerify.mode is off"}
-
-# Gate 2 — adoption. Both the catalog and the runner must exist in THIS repo.
-#          A missing harness is not a failure; it means the repo never opted in.
-if NOT file_exists(cfg.catalog):
-  return {status: "SKIPPED", reason: "no ${cfg.catalog} in this repo"}
-if NOT run_command_defined(cfg.command):
-  return {status: "SKIPPED", reason: "${cfg.command} is not defined in this repo"}
-
-# Gate 3 — the app must ALREADY be serving. Do NOT start it.
-#          Starting a server here would leave a process running after the loop ends,
-#          and killing a port the human is using loses their work. A missing app is
-#          BLOCKED, never PASS.
-if NOT http_reachable(cfg.baseUrl, timeout=5s):
-  return {status: "BLOCKED",
-          reason: "${cfg.baseUrl} is not responding; start the app, then re-run this step"}
-
-# Gate 4 — scope. Only the flows this PR can plausibly have broken.
-#          A full catalog sweep is not a per-PR job (see "Cost discipline" in the
-#          verify-flow skill); it needs a deliberate, separate run.
-changed_files = git diff --name-only origin/${baseRef}...HEAD
-touched_flows = flows in cfg.catalog whose route or spec path matches any changed file
-if touched_flows.length == 0:
-  return {status: "SKIPPED", reason: "diff touches no catalogued flow"}
-
-# Gate 5 — run it, then judge results.json. NOT the exit code: test runners exit 0
-#          when tests skip, so a flow that never executed would read as green.
-run: ${cfg.command}
-if NOT file_exists(cfg.resultsJson):
-  return {status: "BLOCKED", reason: "runner produced no ${cfg.resultsJson}"}
-
-stats = read_json(cfg.resultsJson).stats   # {expected, unexpected, skipped, flaky}
-
-if stats.unexpected > 0:
-  failed = names of failing flows from resultsJson
-  return {status: "FAIL", failedFlows: failed,
-          comment: "Flow verification failed for: ${failed}. Evidence in the runner's output
-                    directory. This leg drives the app, so a failure here means a user-visible
-                    behaviour changed, not a style nit."}
-
-if stats.flaky > 0:
-  # A flake is not a pass. It is an unreliable answer to a yes/no question.
-  return {status: "BLOCKED", reason: "flaky flows: ${flaky names}; stabilise before merging"}
-
-if stats.expected == 0:
-  # Everything skipped — usually a missing credential. Reporting PASS here is the
-  # exact failure mode this leg exists to prevent.
-  return {status: "BLOCKED",
-          reason: "no flow actually ran (${stats.skipped} skipped) — missing credentials?"}
-
-if stats.skipped > 0:
-  # Partial coverage: what ran, passed. Report it, do not hide it.
-  gh pr comment ${prNumber} --body "Flow verification: ${stats.expected} passed,
-    ${stats.skipped} skipped (blocked, not passing). Verified: ${touched_flows}."
-
-return {status: "PASS", reason: "${stats.expected} flows passed, 0 failed"}
-```
-
-Design notes:
-
-- **Final-only by design.** Driving a browser per iteration would dominate loop wall-clock. The
-  reading reviewers catch diff-level problems each iteration; this leg answers the behavioural
-  question once, at the end.
-- **Four outcomes, not two.** `BLOCKED` exists because "could not run" and "ran and passed" are
-  different facts. Collapsing them is how a harness starts lying.
-- **No server lifecycle.** This leg never starts, restarts, or kills a process. That is a
-  deliberate constraint, not an omission.
-- **Never merges.** It gates `safeAutoMerge`; it cannot approve or merge anything itself.
-
-## Auto-merge: `safeAutoMerge(prNumber, baseRef, readySummary)` (v0.4)
-
-Shared SUCCESS_STOP handler called from **both** terminal sites — Mode X step 9c and Mode Y Y.10 — with the **same gates**. It applies the auto-merge gates; if all pass it queues the merge and lets **step 0.6** finish the job on a later tick. If any gate fails it falls back to the existing notify-and-stop (the v0.3 default — unchanged when no repo is opted in).
-
-`readySummary` is the caller's mode-specific success summary, used only in the Gate-1 default notification so each mode keeps its existing "ready" message.
-
-**Config:** read `prAutopilot.autoMerge` from `~/.claude/settings.json` (defaults: `allowedTargetBranches=["dev"]`, `neverMergeToBranches=["master","main","production"]`, `mergeMethod="squash"`).
-
-**Notification discipline:** exactly ONE notification per terminal outcome. A gate failure fires its single "ready / not-merged" message and deletes state (loop done, manual merge). The queue path fires only the "auto-merge queued" message and KEEPS state. No double-notifying.
-
-```
-function safeAutoMerge(prNumber, baseRef, readySummary):
-  cfg = config.autoMerge   # defaults above if absent
-  canon = $(gh repo view --json nameWithOwner -q .nameWithOwner)   # canonical owner/repo — same source as /pr-autopilot:allow + :automerge
-
-  # GATE 1 — opt-in. DEFAULT path: absent ⇒ same notify-and-stop control flow as v0.3.
-  # Match ~/.pr-autopilot/automerge-repos reusing the v0.3 allowlist matching VERBATIM:
-  # trim each line, skip blanks, require a '/', compare case-insensitively.
-  if NOT lineMatchCaseInsensitive(canon, "~/.pr-autopilot/automerge-repos"):
-    PushNotification("PR #${prNumber} ready", "${readySummary} — merge manually or run /land-and-deploy")
-    delete $STATE_FILE
-    return  # SUCCESS_STOP (unchanged v0.3 default)
-
-  # GATE 2 — not paused (shared kill switch with v0.3).
-  if exists "~/.pr-autopilot/paused":
-    PushNotification("PR #${prNumber} ready (auto-merge paused)", "${readySummary} — paused sentinel present; merge manually or /pr-autopilot:resume")
-    delete $STATE_FILE
-    return  # SUCCESS_STOP
-
-  # GATE 3 — base safe. Positive allowlist AND blocklist (production guard).
-  if (baseRef NOT in cfg.allowedTargetBranches) OR (baseRef in cfg.neverMergeToBranches):
-    PushNotification("PR #${prNumber} ready", "PR targets ${baseRef} — not an auto-merge target. Run /land-and-deploy.")
-    delete $STATE_FILE
-    return  # SUCCESS_STOP
-
-  # GATE 4 — PR ready (open + non-draft).
-  pr_now = gh pr view ${prNumber} --json state,isDraft
-  if pr_now.state != "OPEN" OR pr_now.isDraft == true:
-    PushNotification("PR #${prNumber} not auto-merged", "PR not open/non-draft at SUCCESS_STOP — merge manually")
-    delete $STATE_FILE
-    return  # SUCCESS_STOP
-
-  # GATE 5 — CI green on current headRefOid (same logic as step 5 / Y.4.5).
-  required_checks = pr.statusCheckRollup | filter where isRequired   # `pr` fetched at step 1 / Y.1
-  if any required check NOT green (conclusion != SUCCESS or still pending):
-    PushNotification("PR #${prNumber} ready", "reviewers green but CI not green — not auto-merging; merge manually after CI passes")
-    delete $STATE_FILE
-    return  # SUCCESS_STOP
-
-  # GATE 6 — idempotent. Defensive: step 0.6 normally short-circuits a queued PR
-  # before we ever reach here. If reached with autoMergeQueued already true, do NOT
-  # re-queue — fall into the wait instead.
-  if state.autoMergeQueued == true:
-    saveState($STATE_FILE)
-    ScheduleWakeup(config.pollIntervalSeconds, "/loop /pr-autopilot:step ${prNumber}", "waiting for queued auto-merge to complete")
-    return  # go to wait (step 0.6 handles next tick)
-
-  # All gates pass → merge. TWO distinct outcomes: --auto QUEUES (async); the direct
-  # fallback merges NOW (sync). They must NOT be conflated — a synchronous merge is
-  # already done, so it must delete state + notify "merged", never set autoMergeQueued.
-  auto = run("gh pr merge ${prNumber} --auto --${cfg.mergeMethod} --delete-branch")   # capture exit + stderr
-  if auto.failed AND auto.stderr matches "auto-merge .* not enabled":
-    # Repo has no merge queue → direct, SYNCHRONOUS squash (CI + reviews already green at SUCCESS_STOP).
-    direct = run("gh pr merge ${prNumber} --${cfg.mergeMethod} --delete-branch")
-    if direct.succeeded:
-      delete $STATE_FILE   # already merged — nothing to wait for
-      PushNotification("PR #${prNumber} merged → ${baseRef}", "direct ${cfg.mergeMethod} (repo has no auto-merge queue). Run /land-and-deploy for ${baseRef}→master + deploy.")
-      return  # merged synchronously — terminate (do NOT set autoMergeQueued / wait)
-    else:
-      # e.g. branch protection needs a human approval the bot can't satisfy
-      PushNotification("PR #${prNumber} auto-merge blocked", "direct merge refused (branch protection?) — merge manually or run /land-and-deploy")
-      delete $STATE_FILE
-      return  # terminate
-
-  # --auto succeeded → merge is QUEUED; GitHub completes it asynchronously.
-  state.autoMergeQueued = true
-  state.autoMergeAt = now()
-  PushNotification("PR #${prNumber} auto-merge queued → ${baseRef}",
-                   "${cfg.mergeMethod}; completes when checks/branch-protection clear. Run /land-and-deploy for ${baseRef}→master + deploy.")
-  saveState($STATE_FILE)   # do NOT delete — "queued" ≠ "merged"
-  ScheduleWakeup(config.pollIntervalSeconds, "/loop /pr-autopilot:step ${prNumber}", "waiting for queued auto-merge to complete")
-  return  # merge queued — step 0.6 handles subsequent ticks
-```
-
-**Gate semantics (precise):**
-
-| Gate | Check | On fail |
-|---|---|---|
-| 1 — opt-in | `canon` ∈ `~/.pr-autopilot/automerge-repos`, case-insensitive | notify "ready; merge manually or run /land-and-deploy"; delete state; STOP (**DEFAULT** — same notify-and-stop control flow as v0.3) |
-| 2 — not paused | `~/.pr-autopilot/paused` absent | notify + STOP |
-| 3 — base safe | `baseRef` ∈ `allowedTargetBranches` AND ∉ `neverMergeToBranches` | notify "run /land-and-deploy"; STOP |
-| 4 — PR ready | `state == OPEN` AND `isDraft == false` | notify + STOP |
-| 5 — CI green | all required checks green on `headRefOid` | notify "CI not green — not auto-merging"; STOP |
-| 6 — idempotent | `state.autoMergeQueued != true` | skip re-queue; go to wait |
-
-Gates 1 (default-off) + 3 (production guard) are the safety floor. `lineMatchCaseInsensitive` reuses the v0.3 auto-trigger gate-script matching helper verbatim.
-
-## Stop conditions summary
-
-| Condition | Step | Outcome |
-|---|---|---|
-| Missing CLI on PATH (gh / jq / git) | pre-flight 0.1 | ABORT |
-| Not in a git repo | pre-flight 0.2 | ABORT |
-| `gh` not authenticated | pre-flight 0.3 | ABORT |
-| PR not found in current repo | pre-flight 0.4 | ABORT |
-| Config: no driver at all — no per-iter reviewer in {cursor,copilot,codex,copilotSwe(review-score)} AND copilotSwe.mode≠each-iter | pre-flight | ABORT_NO_DRIVER (terminate without ScheduleWakeup). NB: copilotSwe.mode=each-iter IS a Mode Y driver, and copilotSwe.mode=review-score IS a Mode X reviewer — neither is an error. |
-| Config: primaryFixer=claude conflicts with copilotSwe.mode=each-iter | pre-flight | ABORT |
-| Config: ambiguous fixer (per-iter reviewer + copilotSwe each-iter, primaryFixer=auto) | pre-flight | ABORT |
-| PR closed or merged | 2 | SUCCESS_STOP |
-| PR targets dev/master/main directly | 3 | ABORT |
-| `fixIterationCap` fix cap | 4 | ABORT |
-| CI failed on our last push | 5 | ABORT |
-| `pollTickCap` ticks without any per-iter reviewer reviewing | 8 | ABORT |
-| All per-iter reviewers report success AND all final-pass reviewers agree | 9b | SUCCESS_STOP |
-| ≥50 review threads (likely truncation) | 6 | PAUSE |
-| Triage flagged ASK_USER | 10 | PAUSE |
-| Local pre-commit suite failed | 11 | ABORT |
-| `stallTickCap` ticks with same review and zero actions (stall) | 11.5 | PAUSE |
-| Final-pass reviewer disagrees | 9a | PAUSE |
-| **Flow verify (v0.5.4+):** `mode=off`, no catalog, no runner, or diff touches no flow | 9a-bis / Y.9-bis | PASS (SKIPPED, falls through) |
-| **Flow verify:** a touched flow failed (`unexpected > 0`) | 9a-bis / Y.9-bis | PAUSE (comment on PR) |
-| **Flow verify:** app not serving, no `results.json`, flaky, or nothing actually ran | 9a-bis / Y.9-bis | PAUSE (BLOCKED — never counted as passing) |
-| Reviewers green, auto-merge gate fails (not opted-in / paused / base unsafe / not-ready / CI not green) | 9c / Y.10 (`safeAutoMerge` gates 1–5) | SUCCESS_STOP (notify "ready", manual merge) |
-| Reviewers green, all auto-merge gates pass → merge queued, waiting for GitHub | 9c / Y.10 → 0.6 | CONTINUE (wait) |
-| Auto-merge blocked (conflicts / `mergeStateStatus` DIRTY) | 0.6 | STOP (KEEP state) |
-| Auto-merge stuck (`pollTickCap` ticks while queued) | 0.6 | STOP (KEEP state) |
-| PR merged after queue | 0.6 | SUCCESS_STOP (state deleted) |
-| **Graphify (v0.5.3+):** `advisory=off` AND any filesystem state | 0.6a | PASS (no notification, `state.graphifyAvailable=false`) |
-| **Graphify:** `state.autoMergeQueued=true` (queued-merge wait) | 0.6 short-circuits BEFORE 0.6a | §0.6a never runs; merge wait proceeds normally |
-| **Graphify:** `advisory=auto` AND `graph.json` present | 0.6a | PASS (silent, `state.graphifyAvailable=true`) |
-| **Graphify:** `advisory=auto` AND `graph.json` absent (no folder) | 0.6a | INFO once per repo (notice flag), continue |
-| **Graphify:** `advisory=auto` AND broken folder (cache without graph.json) | 0.6a | PAUSE (KEEP state, rebuild message) |
-| **Graphify:** `advisory=always` AND `graph.json` absent | 0.6a | PAUSE (KEEP state, strict-mode message) |
-| **Graphify:** `advisory=always` AND broken folder | 0.6a | PAUSE (KEEP state, rebuild message) |
-
-## Error handling (auto-merge, v0.4)
-
-| Condition | Behavior |
-|---|---|
-| `--auto` not enabled on repo | fall back to direct `gh pr merge --${mergeMethod} --delete-branch` (synchronous; CI + reviews already green). On success → delete state + notify "merged" (do NOT set `autoMergeQueued`/wait); if refused (e.g. branch protection) → notify "blocked" + STOP |
-| Merge blocked (branch protection needs human approval, conflicts, no permission) | step 0.6 notifies; **keeps** state; STOP (no infinite loop) |
-| Queue stuck (open + queued beyond `pollTickCap` ticks) | step 0.6 notifies; STOP; keeps state |
-| PR merged/closed externally while queued | step 0.6 sees `MERGED`/`CLOSED` → cleanup + terminate |
-
-**Recovery from a kept-state STOP (blocked/stuck):** state is retained so nothing is lost. Either (a) resolve the PR (fix conflicts / obtain the required human approval) and re-run `/pr-autopilot:step <PR#>` — step 0.6 picks up the queued merge and finishes — or (b) delete `~/.pr-autopilot/<owner>-<repo>-<N>.json` to abandon. A dedicated `/pr-autopilot:clear` is out of scope for v0.4.
+- **Mode Y** (`mode == "Y"`): read `${CLAUDE_SKILL_DIR}/references/mode-y.md` and run `prAutopilotStepModeY(prNumber)` from there.
+- **`safeAutoMerge(prNumber, baseRef, readySummary)`** (SUCCESS_STOP in step 9c and Y.10): read `${CLAUDE_SKILL_DIR}/references/auto-merge.md` and apply its six gates. With no opt-in (the default) it notifies "ready", deletes state and stops.
+- **Why did it stop?** The full stop-condition table is in `${CLAUDE_SKILL_DIR}/references/stop-conditions.md`.
+- **`flowVerifyLeg(prNumber, baseRef)`** (Mode X step 9a-bis and Mode Y Y.9-bis): read `${CLAUDE_SKILL_DIR}/references/flow-verify.md`. Mode off or no harness means SKIPPED; never merges, never starts a server.
 
 ## See also
 

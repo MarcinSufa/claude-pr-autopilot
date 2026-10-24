@@ -34,6 +34,13 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
       "codex":      { "mode": "off", "postCommentsToPR": false },
       "claudeSelf": { "enabled": false, "rubricFile": "SELF-REVIEW-RUBRIC.md" }
     },
+    "flowVerify": {
+      "mode": "off",
+      "catalog": "flows.md",
+      "command": "npm run verify:flow",
+      "resultsJson": "test-results-verify/results.json",
+      "baseUrl": "http://localhost:3000"
+    },
     "preCommitProfiles": {
       "exo-vault": [
         {"cmd": "pnpm run build"},
@@ -55,6 +62,8 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 }
 ```
 
+**Flow-verification config (v0.5.4):** `prAutopilot.flowVerify` gates a **behavioural** check on top of the review legs — reviewers read the diff, this one drives the app. `mode: "off"` (the default) skips it entirely, so repos without the harness are unaffected. `mode: "final-only"` runs it once, after every reviewer is green and before the auto-merge gate. It never starts a server and never merges on its own. See [`reviewers/FLOW-VERIFY-SETUP.md`](../../reviewers/FLOW-VERIFY-SETUP.md).
+
 **Auto-merge config (v0.4):** `prAutopilot.autoMerge` tunes the *target* + *method* guards for `safeAutoMerge` (see §"Auto-merge"). Safe hardcoded defaults shown above — it works with zero config. The per-repo **opt-in itself is file-based** (`~/.pr-autopilot/automerge-repos`, separate from v0.3's `allowed-repos`); absent ⇒ auto-merge OFF everywhere; the notify-and-stop control flow is unchanged from v0.3 (the notification just adds a "merge manually" hint).
 
 ## Config → algorithm derivation
@@ -70,6 +79,7 @@ Read from `~/.claude/settings.json` under `prAutopilot`. Defaults if missing:
 | `codex.mode=each-iter` | yes | no | yes (`codex review --diff`) | no | pass/fail |
 | `codex.mode=final-only` | no | yes | yes (one-shot at end) | no | pass/fail |
 | `claudeSelf.enabled=true` | no (final-only by design) | yes | no (internal) | no | 1-5 vs rubric |
+| `flowVerify.mode=final-only` | no (too slow for every iter) | yes | no (internal) | no | `results.json` counters, NOT the exit code |
 
 **⚠ Important: Copilot has TWO products** — `copilot` (Copilot Code Review) and `copilotSwe` (Copilot SWE Agent). They are DIFFERENT:
 - **Code Review** posts structured line-level threads. Triggered by adding `Copilot` via the requested-reviewers API (the `@copilot` mention does NOT trigger this). May require specific repo setup (rulesets or manual reviewer add) and a paid Copilot tier with Code Review enabled.
@@ -576,6 +586,19 @@ if all_per_iter_happy AND unresolved_not_ours.length == 0:
         read git diff origin/${pr.baseRefName}..HEAD
         emit 1-5 score against rubric; if < 5 → PAUSE
 
+  # 9a-bis. Flow verification leg (v0.5.4) — behavioural, runs AFTER the reading
+  #         reviewers and BEFORE the auto-merge gate. Every reviewer above reads
+  #         the diff; this one drives the running app.
+  verdict = flowVerifyLeg(prNumber, pr.baseRefName)
+  if verdict.status == "FAIL":
+    gh pr comment ${prNumber} --body "${verdict.comment}"
+    PushNotification("PAUSE", "flow verification failed: ${verdict.failedFlows}")
+    return  # PAUSE — never merge over a red behavioural check
+  if verdict.status == "BLOCKED":
+    PushNotification("PAUSE", "flow verification could not run: ${verdict.reason}")
+    return  # PAUSE — a check that did not run is not a check that passed
+  # "SKIPPED" (mode off, or repo has no harness) and "PASS" both fall through.
+
   # 9b. All final-pass reviewers clear.
   # 9c. SUCCESS_STOP → hand off to the shared auto-merge gate (v0.4).
   #     With no opt-in (the default), safeAutoMerge's Gate 1 keeps the old
@@ -966,6 +989,17 @@ if pause_verdicts:
   return  # PAUSE (terminate)
 
 if not pushback_verdicts:  # all APPROVE
+  # Flow verification leg (v0.5.4) — same helper as Mode X step 9a-bis, same
+  # placement rule: after the reading legs, before the auto-merge gate.
+  verdict = flowVerifyLeg(pr_number, pr.baseRefName)
+  if verdict.status in ("FAIL", "BLOCKED"):
+    if verdict.status == "FAIL":
+      gh pr comment ${pr_number} --body "${verdict.comment}"
+    push_notification(f"PR #{pr_number} PAUSED",
+                      f"Flow verification {verdict.status}: {verdict.reason}")
+    save_state(STATE_FILE)  # KEEP state for user resume
+    return  # PAUSE
+
   # SUCCESS_STOP → shared auto-merge gate (v0.4). Same gates as Mode X; no Mode Y
   # final-pass in v0.2. Default (no opt-in) path reproduces the old notify+delete,
   # preserving this mode's message via readySummary.
@@ -1006,6 +1040,90 @@ return  # CONTINUE
 **The "approval prose without commits → PAUSE-by-default" branch** (resolves Medium #8) handles the case where SWE Agent posts "LGTM" without pushing anything. PR #127 worked because the body said "deliberate smells" — without that signal, "LGTM with no changes" is too weak a signal to auto-succeed on. Default to PAUSE; user confirms manually.
 
 **The `is_refusal` and `is_approval_prose` heuristics** are simple regex over comment body, defined in the Helper functions (Mode Y) subsection above; simple regex over the comment body.
+
+## Flow verification: `flowVerifyLeg(prNumber, baseRef)` (v0.5.4)
+
+Shared by Mode X and Mode Y. Returns `{status, reason, failedFlows, comment}` where `status` is
+one of `SKIPPED` / `PASS` / `FAIL` / `BLOCKED`.
+
+Every other leg in this loop reads the diff. This one drives the running application and asks a
+different question: do the user flows this PR touches still work? Setup and adoption:
+[`reviewers/FLOW-VERIFY-SETUP.md`](../../reviewers/FLOW-VERIFY-SETUP.md).
+
+```
+cfg = config.flowVerify
+
+# Gate 1 — opt-in. Absent config or mode "off" ⇒ SKIPPED. Repos without the harness
+#          must be unaffected by this leg existing.
+if cfg == null OR cfg.mode == "off":
+  return {status: "SKIPPED", reason: "flowVerify.mode is off"}
+
+# Gate 2 — adoption. Both the catalog and the runner must exist in THIS repo.
+#          A missing harness is not a failure; it means the repo never opted in.
+if NOT file_exists(cfg.catalog):
+  return {status: "SKIPPED", reason: "no ${cfg.catalog} in this repo"}
+if NOT run_command_defined(cfg.command):
+  return {status: "SKIPPED", reason: "${cfg.command} is not defined in this repo"}
+
+# Gate 3 — the app must ALREADY be serving. Do NOT start it.
+#          Starting a server here would leave a process running after the loop ends,
+#          and killing a port the human is using loses their work. A missing app is
+#          BLOCKED, never PASS.
+if NOT http_reachable(cfg.baseUrl, timeout=5s):
+  return {status: "BLOCKED",
+          reason: "${cfg.baseUrl} is not responding; start the app, then re-run this step"}
+
+# Gate 4 — scope. Only the flows this PR can plausibly have broken.
+#          A full catalog sweep is not a per-PR job (see "Cost discipline" in the
+#          verify-flow skill); it needs a deliberate, separate run.
+changed_files = git diff --name-only origin/${baseRef}...HEAD
+touched_flows = flows in cfg.catalog whose route or spec path matches any changed file
+if touched_flows.length == 0:
+  return {status: "SKIPPED", reason: "diff touches no catalogued flow"}
+
+# Gate 5 — run it, then judge results.json. NOT the exit code: test runners exit 0
+#          when tests skip, so a flow that never executed would read as green.
+run: ${cfg.command}
+if NOT file_exists(cfg.resultsJson):
+  return {status: "BLOCKED", reason: "runner produced no ${cfg.resultsJson}"}
+
+stats = read_json(cfg.resultsJson).stats   # {expected, unexpected, skipped, flaky}
+
+if stats.unexpected > 0:
+  failed = names of failing flows from resultsJson
+  return {status: "FAIL", failedFlows: failed,
+          comment: "Flow verification failed for: ${failed}. Evidence in the runner's output
+                    directory. This leg drives the app, so a failure here means a user-visible
+                    behaviour changed, not a style nit."}
+
+if stats.flaky > 0:
+  # A flake is not a pass. It is an unreliable answer to a yes/no question.
+  return {status: "BLOCKED", reason: "flaky flows: ${flaky names}; stabilise before merging"}
+
+if stats.expected == 0:
+  # Everything skipped — usually a missing credential. Reporting PASS here is the
+  # exact failure mode this leg exists to prevent.
+  return {status: "BLOCKED",
+          reason: "no flow actually ran (${stats.skipped} skipped) — missing credentials?"}
+
+if stats.skipped > 0:
+  # Partial coverage: what ran, passed. Report it, do not hide it.
+  gh pr comment ${prNumber} --body "Flow verification: ${stats.expected} passed,
+    ${stats.skipped} skipped (blocked, not passing). Verified: ${touched_flows}."
+
+return {status: "PASS", reason: "${stats.expected} flows passed, 0 failed"}
+```
+
+Design notes:
+
+- **Final-only by design.** Driving a browser per iteration would dominate loop wall-clock. The
+  reading reviewers catch diff-level problems each iteration; this leg answers the behavioural
+  question once, at the end.
+- **Four outcomes, not two.** `BLOCKED` exists because "could not run" and "ran and passed" are
+  different facts. Collapsing them is how a harness starts lying.
+- **No server lifecycle.** This leg never starts, restarts, or kills a process. That is a
+  deliberate constraint, not an omission.
+- **Never merges.** It gates `safeAutoMerge`; it cannot approve or merge anything itself.
 
 ## Auto-merge: `safeAutoMerge(prNumber, baseRef, readySummary)` (v0.4)
 
@@ -1126,6 +1244,9 @@ Gates 1 (default-off) + 3 (production guard) are the safety floor. `lineMatchCas
 | Local pre-commit suite failed | 11 | ABORT |
 | `stallTickCap` ticks with same review and zero actions (stall) | 11.5 | PAUSE |
 | Final-pass reviewer disagrees | 9a | PAUSE |
+| **Flow verify (v0.5.4+):** `mode=off`, no catalog, no runner, or diff touches no flow | 9a-bis / Y.9-bis | PASS (SKIPPED, falls through) |
+| **Flow verify:** a touched flow failed (`unexpected > 0`) | 9a-bis / Y.9-bis | PAUSE (comment on PR) |
+| **Flow verify:** app not serving, no `results.json`, flaky, or nothing actually ran | 9a-bis / Y.9-bis | PAUSE (BLOCKED — never counted as passing) |
 | Reviewers green, auto-merge gate fails (not opted-in / paused / base unsafe / not-ready / CI not green) | 9c / Y.10 (`safeAutoMerge` gates 1–5) | SUCCESS_STOP (notify "ready", manual merge) |
 | Reviewers green, all auto-merge gates pass → merge queued, waiting for GitHub | 9c / Y.10 → 0.6 | CONTINUE (wait) |
 | Auto-merge blocked (conflicts / `mergeStateStatus` DIRTY) | 0.6 | STOP (KEEP state) |
@@ -1156,5 +1277,6 @@ Gates 1 (default-off) + 3 (production guard) are the safety floor. `lineMatchCas
 - [`REVIEW-TRIAGE-COPY.md`](../../REVIEW-TRIAGE-COPY.md) — multi-login fetch/classify/reply routine
 - [`reviewers/CURSOR-SETUP.md`](../../reviewers/CURSOR-SETUP.md) — one-time Cursor setup
 - [`reviewers/COPILOT-SETUP.md`](../../reviewers/COPILOT-SETUP.md) — Copilot adapter modes
+- [`reviewers/FLOW-VERIFY-SETUP.md`](../../reviewers/FLOW-VERIFY-SETUP.md) — behavioural flow-verification leg
 - [`EVAL.md`](../../EVAL.md) — test scenarios + Phase 1 gating
 - [`docs/DESIGN.md`](../../docs/DESIGN.md) — full architecture spec

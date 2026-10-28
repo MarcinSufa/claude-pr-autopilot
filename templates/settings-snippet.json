@@ -1,6 +1,6 @@
 {
   "_comment_1": "pr-autopilot v0.5 — settings snippet to merge into your project's .claude/settings.json",
-  "_comment_2": "Replace <version> with the installed pr-autopilot version (e.g. 0.5.0).",
+  "_comment_2": "No editing is needed; when CLAUDE_PLUGIN_ROOT is unset, the hook path picks the newest installed pr-autopilot version.",
   "_comment_3": "Replace <your-vault-uuid> with your ExoVault vault id from https://exovault.co.",
   "_comment_4": "DO NOT keep the _comment_* keys — they are documentation only. Strip them when merging.",
   "_comment_5": "If your project already has hooks defined, merge into the existing 'hooks' object; do not overwrite.",
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/cache/claude-pr-autopilot/pr-autopilot/<version>}/hooks/check-origin-main.sh",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-$(ls -d \"$HOME\"/.claude/plugins/cache/claude-pr-autopilot/pr-autopilot/*/ 2>/dev/null | sort -V | tail -n 1)}/hooks/check-origin-main.sh\"",
             "timeout": 8,
             "_comment": "Always-on safety net. Reports if local main or feature-branch base is stale vs origin/main. Does NOT honor allowlist or pause — runs in every session."
           }
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/plugins/cache/claude-pr-autopilot/pr-autopilot/<version>}/hooks/enforce-spec-gate.sh",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-$(ls -d \"$HOME\"/.claude/plugins/cache/claude-pr-autopilot/pr-autopilot/*/ 2>/dev/null | sort -V | tail -n 1)}/hooks/enforce-spec-gate.sh\"",
             "timeout": 10,
             "_comment_a": "Hard gate: denies (permissionDecision=deny) Write/Edit/NotebookEdit and recognisable Bash writes (>, >>, tee, sed -i, cp/mv) inside the repo outside specs/ unless the claim file shows subStatus=implementing|pr_* with approvedAt set. Also denies agent edits of approvedAt/approvedBy/approvalContext in claim files. Honors pause sentinel + allowlist. See the script header for what remains bypassable."
           }

@@ -139,6 +139,7 @@ jobs:
       - name: Run hook unit tests
         run: |
           set -e
+          bash hooks/tests/test-settings-snippet.sh
           bash hooks/tests/test-spec-gate.sh
           bash hooks/tests/test-trigger.sh
           bash hooks/tests/test-review-spec-helpers.sh

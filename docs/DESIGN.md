@@ -43,7 +43,7 @@ claude-pr-autopilot/
 │   └── marketplace.json         ← marketplace metadata with single plugin entry
 ├── .github/
 │   └── workflows/
-│       └── smoketest.yml        ← schema validation + markdownlint (ubuntu-latest only for v0.1.0; expand later)
+│       └── smoketest.yml        ← schema validation + markdownlint (ubuntu-latest); hook tests (ubuntu-latest and macos-latest)
 ├── .gitignore                   ← copied from claude-watch-video; tailored to skill artifacts (.pr-autopilot/, credentials)
 ├── LICENSE                      ← MIT
 ├── README.md                    ← marketing + walkthrough + badges (mirrors claude-watch-video style)
@@ -137,7 +137,7 @@ Tag releases in git: `v0.1.0`, `v0.2.0`, etc. CHANGELOG.md updated per release (
 
 ### CI smoketest
 
-`/.github/workflows/smoketest.yml` runs on push to `main` and on every PR. Two jobs:
+`/.github/workflows/smoketest.yml` runs on push to `main` and on every PR. Three jobs:
 
 **Job 1: schema validation** (always runs)
 - Validate `plugin.json` against [Anthropic plugin schema](https://docs.claude.com/en/docs/claude-code/plugins) (or basic JSON schema if no official one exists)
@@ -150,7 +150,9 @@ Tag releases in git: `v0.1.0`, `v0.2.0`, etc. CHANGELOG.md updated per release (
 - Catches broken links, dead anchors, formatting drift
 - ~10s, runs on ubuntu-latest only (no OS-specific markdown concerns)
 
-**Matrix:** ubuntu-latest only for v0.1.0. Add windows-latest at v0.5+ if we ship anything OS-specific (e.g., a setup script).
+**Job 3: shell hook tests** (matrix: ubuntu-latest and macos-latest)
+
+**Matrix:** schema validation and markdownlint run on ubuntu-latest; shell hook tests run on ubuntu-latest and macos-latest. Windows CI remains deferred.
 
 **Explicitly NOT in CI v0.1.0:** jq snippet validity check (defer to v0.5+ if we hit a typo), end-to-end dry run against synthetic PR (defer to v1.0).
 

@@ -101,14 +101,29 @@ jobs:
             || (echo 'Markdown lint failed' && exit 1)
 
   hook-tests:
-    name: hook unit tests (v0.5)
-    runs-on: ubuntu-latest
+    name: hook unit tests (v0.5) (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install jq
+      - name: Install jq on Linux
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Install jq on macOS
+        if: runner.os == 'macOS'
+        run: if ! command -v jq >/dev/null 2>&1; then brew install jq; fi
+
+      - name: Use macOS system Bash and utilities
+        if: runner.os == 'macOS'
+        run: |
+          echo /bin >> "$GITHUB_PATH"
+          echo /usr/bin >> "$GITHUB_PATH"
 
       - name: Validate hook scripts have valid bash syntax
         run: |

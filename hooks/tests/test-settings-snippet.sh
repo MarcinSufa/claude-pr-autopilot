@@ -31,7 +31,10 @@ for hook in enforce-spec-gate.sh check-origin-main.sh; do
   write_stub "$TMP/plugin root/hooks/$hook"
 done
 
-mapfile -t commands < <(jq -r '.hooks[][].hooks[].command' "$SNIPPET")
+commands=()
+while IFS= read -r line; do
+  commands+=("$line")
+done < <(jq -r '.hooks[][].hooks[].command' "$SNIPPET")
 if [ "${#commands[@]}" = "2" ]; then
   pass=$((pass+1)); echo "ok   - found both hook commands"
 else

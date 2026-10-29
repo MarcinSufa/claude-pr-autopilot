@@ -35,7 +35,7 @@ Use cases:
 
 2. **Step 1.5 — print initial status table.** See `Step 1.5` in normal mode "Steps (normal mode)". Same format. Skip the "iter <n>" annotation (bootstrap has no iter tracking).
 
-3. **Dispatch reviewers** identically to normal mode Step 2 (see below). Use the bootstrap `<path>` as the `<path>` placeholder in adapter prompts.
+3. **Dispatch reviewers** identically to normal mode Step 2 (see below). Use the bootstrap `<path>` as the `<path>` placeholder in adapter prompts. The `feature-dev:code-reviewer` agent is optional; if it is unavailable, use `general-purpose` with the same code-reviewer prompt and label the row `general-purpose (code-reviewer fallback)`.
 
 4. **Composer 2.5 prompt** — print to chat per "Step 3" in normal mode. Same format. Path is the bootstrap argument.
 
@@ -54,6 +54,8 @@ Use cases:
 
    Aggregate: P0 X, P1 Y, P2 Z, avg <A>/5 over <M> scored channels.
    ```
+
+   The example above shows output when `feature-dev` is installed. Use the fallback label and model description from normal mode Step 4 when `general-purpose` handles the code-reviewer prompt.
 
    Outlier footer (if any single reviewer Score ≤ 2) — same format as normal mode.
 

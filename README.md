@@ -5,7 +5,7 @@
 [![smoketest](https://github.com/MarcinSufa/claude-pr-autopilot/actions/workflows/smoketest.yml/badge.svg)](https://github.com/MarcinSufa/claude-pr-autopilot/actions/workflows/smoketest.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-purple.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
-[![Status: v0.5.4 (pre-1.0)](https://img.shields.io/badge/status-v0.5.4%20pre--1.0-blue.svg)](docs/DESIGN.md)
+[![Status: v0.5.5 (pre-1.0)](https://img.shields.io/badge/status-v0.5.5%20pre--1.0-blue.svg)](docs/DESIGN.md)
 
 A Claude Code marketplace plugin that closes the PR review→fix loop. Cursor reviews your PR (or Copilot / Codex / Claude-self — configurable), Claude reads each review and either fixes the issue or pushes back with reasoning, then pushes the fix and waits for the next round. Stops when all enabled reviewers report success — or hits one of ten independent safety guards.
 
@@ -37,7 +37,7 @@ After install, restart your shell so the binaries are on PATH. Then run `gh auth
 | `/pr-autopilot:step` (PR review loop) | **No.** It needs at least one per-iteration reviewer. With none enabled, pre-flight ends with `ABORT_NO_DRIVER` ("no per-iter reviewer or fixer enabled; nothing would drive the loop"). | Cursor (Pro, $20/mo, the default reviewer), GitHub Copilot (a seat; Code Review or the SWE Agent), Codex CLI (paid subscription). Claude-self review is final-pass only, so it cannot drive the loop on its own. |
 | `/pr-autopilot:review-spec` (spec review) | **Yes.** With zero keys it runs 2 Claude subagents (code reviewer + adversarial) and prints a copy-paste prompt for an optional manual Composer review. | Codex CLI (`OPENAI_API_KEY`) and Cursor Cloud Agent (`CURSOR_API_KEY`, paid Cursor plan) are added only when their keys and plan checks pass. |
 
-`/review-spec`'s code-reviewer subagent comes from the official `feature-dev` plugin, which `pr-autopilot` declares as a dependency (`feature-dev@claude-plugins-official`). If that agent is not available, the skill falls back to a `general-purpose` subagent.
+The official `feature-dev` plugin is recommended for `/review-spec`'s dedicated code-reviewer agent, but it is optional. Without it, `/review-spec` sends the same code-review prompt to a `general-purpose` subagent.
 
 ## Usage (Phase 1)
 
@@ -143,7 +143,7 @@ v0.5.3 doesn't prescribe an approach — pick what fits your team. Pre-flight `s
 
 ## Status
 
-**v0.5.4 — pre-PR lifecycle + graphify awareness (pre-1.0).** Mode X + Mode Y rotation (v0.2), in-session auto-trigger (v0.3, beta), opt-in dev-only auto-merge (v0.4, beta), the pre-PR lifecycle skills and spec gate (v0.5), graphify code-graph awareness (v0.5.3), and the behavioural flow-verification leg (v0.5.4, off by default) shipped. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them.
+**v0.5.5 (pre-1.0).** Mode X + Mode Y rotation (v0.2), in-session auto-trigger (v0.3, beta), opt-in dev-only auto-merge (v0.4, beta), the pre-PR lifecycle skills and spec gate (v0.5), graphify code-graph awareness (v0.5.3), and the behavioural flow-verification leg (v0.5.4, off by default) shipped. v0.5.5 makes the feature-dev code-reviewer optional, with a general-purpose subagent fallback. The eight EVAL gating scenarios (1, 4, 8, 11, 17Y, 22, 23, 24) are not yet verified on a fresh live PR; **v1.0.0** is the stability gate that requires them.
 
 ## Setup
 

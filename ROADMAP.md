@@ -24,7 +24,14 @@ blocklist), CI-gated, queued-vs-merged handled by a merge-wait short-circuit (st
 squash when a repo lacks GitHub auto-merge. Never auto-invokes `/land-and-deploy` (notify + recommend only).
 Spec: docs/superpowers/specs/2026-05-24-pr-autopilot-v0.4-auto-merge-design.md.
 
-## v0.5.4 — Flow verification leg (this patch)
+## v0.5.5: Optional feature-dev reviewer (this patch)
+
+Patch release on top of v0.5.4. The official `feature-dev` plugin is recommended
+for `/review-spec`'s dedicated code-reviewer agent, but is no longer a required
+dependency. When it is unavailable, `/review-spec` sends the same code-review
+prompt to a `general-purpose` subagent.
+
+## v0.5.4: Flow verification leg (shipped)
 
 Adds a **behavioural** gate alongside the reading reviewers. Every existing leg reads the diff;
 `flowVerify` drives the running app through the user flows the PR touches and gates the auto-merge

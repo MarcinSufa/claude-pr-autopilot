@@ -73,7 +73,7 @@ Dispatching reviewers:
 
 | Reviewer | Type | Status |
 |---|---|---|
-| feature-dev:code-reviewer | Claude subagent (FREE, always) | ⏳ pending |
+| code reviewer (feature-dev or general-purpose fallback) | Claude subagent (FREE, always) | ⏳ pending |
 | general-purpose adversarial | Claude subagent (FREE, hostile) | ⏳ pending |
 | codex-exec | <if env+CLI set: ⏳ pending; else: ⏭ skipped (no OPENAI_API_KEY / codex)> |
 | cursor-cloud-agent | <after probe: ⏳ pending (Pro) OR ⏭ skipped (Free/invalid/network)> |
@@ -136,7 +136,7 @@ Now dispatch all enabled adapters in parallel via a single Agent-tool-call messa
 
 **Always (FREE):**
 - **claude-code-reviewer-subagent**: `Agent({ subagent_type: 'feature-dev:code-reviewer', description: 'Pre-PR spec review', prompt: <see "Adapter prompts" below, with <path> = claimFile.specFile or bootstrap argument> })`
-  - `feature-dev:code-reviewer` comes from the `feature-dev` plugin (`claude-plugins-official`, declared in `plugin.json` `dependencies`). If that agent type is not available in this session, use `subagent_type: 'general-purpose'` with the same code-reviewer prompt, and label the row `general-purpose (code-reviewer fallback)`. Do not skip the channel.
+  - `feature-dev:code-reviewer` comes from the official `feature-dev` plugin, which is recommended but optional. If that agent type is not available in this session, use `subagent_type: 'general-purpose'` with the same code-reviewer prompt, and label the row `general-purpose (code-reviewer fallback)`. Do not skip the channel.
 - **claude-self-review** (hostile, FREE): `Agent({ subagent_type: 'general-purpose', description: 'Adversarial spec review', prompt: <hostile template, same path substitution> })`
 
 **Opt-in PAID (if env set):**

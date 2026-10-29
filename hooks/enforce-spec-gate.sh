@@ -52,6 +52,8 @@
 #     v0.5.0), but Bash writes outside the repo (e.g. /tmp) are allowed.
 
 set -euo pipefail
+# Bash 5.2 expands & in unquoted pattern replacements; bash 3.2 keeps literal quotes when quoted.
+shopt -u patsub_replacement 2>/dev/null || true
 
 LIFTED_STATES="implementing pr_opened pr_review_requested pr_revising merged"
 APPROVAL_FIELDS_RE='approvedAt|approvedBy|approvalContext'
@@ -107,6 +109,7 @@ fi
 # `pwd` and `git rev-parse --show-toplevel` on Windows (UNIX `/tmp/...` vs `C:/Users/...`).
 REPO_ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || echo "")
 [ -z "$REPO_ROOT" ] && exit 0
+REPO_ROOT=$(cd -P -- "$REPO_ROOT" && pwd -P)
 CLAIM_DIR="$REPO_ROOT/.claude/assignment-claims"
 [ -d "$CLAIM_DIR" ] || exit 0   # outside the pre-PR lifecycle
 
@@ -150,7 +153,16 @@ abs_path() {
 
 # Prints the repo-relative path of $1 if it is inside REPO_ROOT, else nothing.
 repo_rel() {
-  local a; a=$(abs_path "$1")
+  local a parent suffix=""; a=$(abs_path "$1")
+  parent="$a"
+  while [ ! -d "$parent" ]; do
+    suffix="/${parent##*/}$suffix"
+    parent="${parent%/*}"
+    [ -n "$parent" ] || parent="/"
+  done
+  parent=$(cd -P -- "$parent" && pwd -P)
+  a="${parent%/}$suffix"
+  [ -n "$a" ] || a="/"
   case "$a" in
     "$REPO_ROOT") printf '.' ;;
     "$REPO_ROOT"/*) printf '%s' "${a#"$REPO_ROOT"/}" ;;
@@ -277,7 +289,7 @@ check_claim_write() {  # $1 = target path as given; uses INPUT
       old_s=$(printf '%s' "$INPUT" | jq -r '.tool_input.old_string // ""')
       new_s=$(printf '%s' "$INPUT" | jq -r '.tool_input.new_string // ""')
       all=$(printf '%s' "$INPUT" | jq -r '.tool_input.replace_all // false')
-      if [ "$all" = "true" ]; then new="${cur//"$old_s"/"$new_s"}"; else new="${cur/"$old_s"/"$new_s"}"; fi
+      if [ "$all" = "true" ]; then new="${cur//"$old_s"/$new_s}"; else new="${cur/"$old_s"/$new_s}"; fi
       ;;
     MultiEdit)
       new="$cur"
@@ -286,7 +298,7 @@ check_claim_write() {  # $1 = target path as given; uses INPUT
         old_s=$(printf '%s' "$INPUT" | jq -r --argjson k "$k" '.tool_input.edits[$k].old_string // ""')
         new_s=$(printf '%s' "$INPUT" | jq -r --argjson k "$k" '.tool_input.edits[$k].new_string // ""')
         all=$(printf '%s' "$INPUT" | jq -r --argjson k "$k" '.tool_input.edits[$k].replace_all // false')
-        if [ "$all" = "true" ]; then new="${new//"$old_s"/"$new_s"}"; else new="${new/"$old_s"/"$new_s"}"; fi
+        if [ "$all" = "true" ]; then new="${new//"$old_s"/$new_s}"; else new="${new/"$old_s"/$new_s}"; fi
       done
       ;;
     *)

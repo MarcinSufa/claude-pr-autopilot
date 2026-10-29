@@ -154,6 +154,14 @@ make_claim_repo "t3" "spec_drafting" null
 run_gate_json "$TESTS_TMP/t3" "$(jq -n --arg fp "$CLAIM_REL" '{tool_name:"Edit",tool_input:{file_path:$fp,old_string:"\"spec_drafting\"",new_string:"\"spec_review_requested\""}}')"
 assert_decision "T3: spec_drafting + edit claim subStatus → allow" allow
 
+make_claim_repo "t3a" "spec_drafting" null
+run_gate_json "$TESTS_TMP/t3a" "$(jq -n --arg fp "$CLAIM_REL" '{tool_name:"Edit",tool_input:{file_path:$fp,old_string:"\"spec_drafting\"",new_string:"\"a & b\""}}')"
+assert_decision "T3a: Edit claim subStatus with ampersand → allow" allow
+
+make_claim_repo "t3b" "spec_drafting" null
+run_gate_json "$TESTS_TMP/t3b" "$(jq -n --arg fp "$CLAIM_REL" '{tool_name:"MultiEdit",tool_input:{file_path:$fp,edits:[{old_string:"\"spec_drafting\"",new_string:"\"a & b\""}]}}')"
+assert_decision "T3b: MultiEdit claim subStatus with ampersand → allow" allow
+
 # T4: implementing + approvedAt set → ALLOW
 make_claim_repo "t4" "implementing" '"2026-05-28T18:00:00Z"'
 run_gate "$TESTS_TMP/t4" "src/foo.ts"
